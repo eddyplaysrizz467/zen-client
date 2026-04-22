@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zen Client</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="scene">
+      <div class="zen-moon"></div>
+      <div class="zen-tree" aria-hidden="true"></div>
+    </div>
+
+    <main class="app-shell">
+      <header class="hero">
+        <div class="brand">
+          <div class="zen-logo" aria-hidden="true"></div>
+          <div>
+            <h1>Zen Client</h1>
+            <p>A calm Minecraft launcher with Microsoft sign-in, saved accounts, and Vanilla, Fabric, or Quilt launching.</p>
+          </div>
+        </div>
+        <div class="hero-help" id="heroHelp">Step 1: choose an account. Step 2: choose a version. Step 3: launch.</div>
+      </header>
+
+      <nav class="tabs">
+        <button id="tabLauncher" class="tab-button active" type="button">Launcher</button>
+        <button id="tabSettings" class="tab-button" type="button">Settings</button>
+        <button id="tabSkins" class="tab-button" type="button">Skins</button>
+      </nav>
+
+      <section id="panelLauncher" class="layout tab-panel active" aria-label="Launcher panel">
+        <aside class="card accounts-card">
+          <div class="card-head">
+            <h2>Accounts</h2>
+            <p>Use a Microsoft account for real online sign-in, or make an offline profile for local play/testing.</p>
+          </div>
+
+          <div class="action-row">
+            <button id="microsoftButton" class="primary">Sign in with Microsoft</button>
+            <button id="removeAccountButton" class="ghost">Remove selected</button>
+          </div>
+
+          <div id="accountsList" class="accounts-list"></div>
+
+          <div class="offline-form">
+            <h3>Quick offline profile</h3>
+            <label>
+              Username
+              <input id="offlineUsername" type="text" placeholder="Your in-game name" />
+            </label>
+            <label>
+              UUID (optional)
+              <input id="offlineUuid" type="text" placeholder="Leave blank to auto-create one" />
+            </label>
+            <button id="offlineButton" class="ghost wide">Add offline account</button>
+          </div>
+        </aside>
+
+        <section class="card launch-card">
+          <div class="card-head">
+            <h2>Launch</h2>
+            <p>Pick your loader, version, and memory. Zen Client will save your choices and try to use the right Java automatically.</p>
+          </div>
+
+          <div class="settings-grid">
+            <label>
+              Launch type
+              <select id="launchType">
+                <option>Vanilla</option>
+                <option>Fabric</option>
+                <option>Quilt</option>
+              </select>
+            </label>
+
+            <label>
+              Minecraft version
+              <select id="minecraftVersion"></select>
+            </label>
+
+            <label>
+              Memory (MB)
+              <input id="memoryMb" type="number" min="1024" step="256" />
+            </label>
+
+            <label class="span-two">
+              Minecraft folder
+              <input id="minecraftDirectory" type="text" />
+            </label>
+
+            <label>
+              Custom Java path (optional)
+              <input id="javaPath" type="text" placeholder="Leave blank to auto-find Java" />
+            </label>
+          </div>
+
+          <div class="action-row launch-row">
+            <button id="refreshVersionsButton" class="ghost">Refresh versions</button>
+            <button id="launchButton" class="primary">Launch Minecraft</button>
+          </div>
+
+          <div class="status-card">
+            <div id="statusText" class="status-text">Loading launcher state...</div>
+            <div id="progressText" class="progress-text"></div>
+            <pre id="logBox" class="log-box"></pre>
+          </div>
+        </section>
+      </section>
+
+      <section id="panelSettings" class="tab-panel" aria-label="Settings panel">
+        <div class="card settings-card">
+          <div class="card-head">
+            <h2>Settings</h2>
+            <p>Customize the look, Discord Rich Presence, and optional Zen-themed main menu pack.</p>
+          </div>
+
+          <div class="settings-grid settings-grid-wide">
+            <label>
+              Background preset
+              <select id="backgroundPreset">
+                <option value="ink">Ink Night</option>
+                <option value="stone">Stone Mist</option>
+                <option value="bamboo">Bamboo Glow</option>
+              </select>
+            </label>
+
+            <label>
+              Discord Rich Presence
+              <select id="discordEnabled">
+                <option value="off">Off</option>
+                <option value="on">On</option>
+              </select>
+            </label>
+
+            <label>
+              Discord App ID (optional)
+              <input id="discordAppId" type="text" placeholder="Needed to show Rich Presence in Discord" />
+            </label>
+
+            <label>
+              Show launcher status
+              <select id="discordShowLauncher">
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
+
+            <label>
+              Show playing status
+              <select id="discordShowPlaying">
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="action-row">
+            <button id="installMenuPackButton" class="ghost">Install Zen main menu pack</button>
+            <div class="hint">This installs a small resource pack that changes the Minecraft title background. Enable it inside Minecraft Resource Packs.</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="panelSkins" class="tab-panel" aria-label="Skins panel">
+        <div class="card skins-card">
+          <div class="card-head">
+            <h2>Skins</h2>
+            <p>Upload a new skin for your selected Microsoft account. Offline profiles can’t change online skins.</p>
+          </div>
+
+          <div class="skins-grid">
+            <div class="skin-preview">
+              <div class="skin-preview-title">Current skin</div>
+              <div id="skinPreviewBox" class="skin-preview-box">
+                <div class="empty-state">Select a Microsoft account to load skin info.</div>
+              </div>
+            </div>
+
+            <div class="skin-actions">
+              <label>
+                Skin PNG file
+                <input id="skinFile" type="file" accept="image/png" />
+              </label>
+              <div class="action-row">
+                <button id="uploadClassicSkin" class="primary" type="button">Upload Classic</button>
+                <button id="uploadSlimSkin" class="ghost" type="button">Upload Slim</button>
+                <button id="refreshSkinButton" class="ghost" type="button">Refresh skin</button>
+              </div>
+              <div class="hint">Tip: classic is Steve arms, slim is Alex arms. Uploading changes your account’s online skin.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="./renderer.js"></script>
+  </body>
+  </html>
