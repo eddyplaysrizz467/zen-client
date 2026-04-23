@@ -22,13 +22,10 @@
     "appId": "com.eddyplaysrizz467.zenclient",
     "productName": "Zen Client",
     "files": [
-      "**/*",
-      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
-      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}/**",
-      "!**/*.map",
-      "!**/.git/**",
-      "!**/.venv/**",
-      "!**/__pycache__/**"
+      "main.js",
+      "preload.js",
+      "src/**",
+      "package.json"
     ],
     "directories": {
       "buildResources": "build",

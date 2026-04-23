@@ -31,7 +31,17 @@ jobs:
       - name: Build installer (NSIS)
         run: npm run dist
 
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zen-client-windows-installer
+          path: |
+            dist/*.exe
+            dist/*.yml
+            dist/*.blockmap
+
       - name: Create GitHub Release + upload installer assets
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
