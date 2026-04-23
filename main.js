@@ -7,7 +7,6 @@ const { Client, Authenticator } = require("minecraft-launcher-core");
 const { Auth, tokenUtils } = require("msmc");
 const RPC = require("discord-rpc");
 const { PNG } = require("pngjs");
-const { autoUpdater } = require("electron-updater");
 
 const APP_NAME = "Zen Client";
 const APP_DIR = path.join(app.getPath("appData"), "ZenClient");
@@ -160,6 +159,14 @@ function createWindow() {
 function initAutoUpdater() {
   // Auto-updater only makes sense for packaged installer builds.
   if (!app.isPackaged) return;
+
+  let autoUpdater = null;
+  try {
+    ({ autoUpdater } = require("electron-updater"));
+  } catch (error) {
+    appendLog(`[update] Auto-updater unavailable: ${error?.message || String(error)}`);
+    return;
+  }
 
   autoUpdater.autoDownload = true;
   autoUpdater.logger = null;
