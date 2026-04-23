@@ -103,13 +103,48 @@ function sendEvent(channel, payload) {
 }
 
 function zenIconDataUrl() {
-  // Simple black/white concentric-circle logo (matches the launcher UI badge).
+  // Ink-brush enso icon used by the launcher branding.
   const svg = `
   <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-    <rect width="64" height="64" rx="12" fill="#0a0a0a"/>
-    <circle cx="32" cy="32" r="24" fill="none" stroke="#f5f5f5" stroke-width="6"/>
-    <circle cx="32" cy="32" r="13" fill="none" stroke="#f5f5f5" stroke-width="6"/>
-    <circle cx="32" cy="32" r="5" fill="#f5f5f5"/>
+    <defs>
+      <filter id="ink" x="-30%" y="-30%" width="160%" height="160%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" result="noise"/>
+        <feDisplacementMap in="SourceGraphic" in2="noise" scale="1.4" xChannelSelector="R" yChannelSelector="G"/>
+        <feGaussianBlur stdDeviation="0.25"/>
+      </filter>
+      <radialGradient id="paper" cx="40%" cy="30%" r="70%">
+        <stop offset="0%" stop-color="#151515"/>
+        <stop offset="100%" stop-color="#0a0a0a"/>
+      </radialGradient>
+    </defs>
+    <rect width="64" height="64" rx="12" fill="url(#paper)"/>
+    <path
+      d="M 46 17
+         C 38 9, 20 11, 15 23
+         C 10 35, 17 50, 30 52
+         C 42 54, 54 44, 52 31
+         C 50 21, 40 15, 33 16"
+      fill="none"
+      stroke="#f4f4f4"
+      stroke-width="7.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      opacity="0.95"
+      filter="url(#ink)"
+    />
+    <path
+      d="M 47 18
+         C 40 11, 23 12, 17 24
+         C 12 36, 18 49, 30 51
+         C 42 53, 52 45, 51 33"
+      fill="none"
+      stroke="#f4f4f4"
+      stroke-width="3.2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      opacity="0.22"
+      filter="url(#ink)"
+    />
   </svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
@@ -146,10 +181,10 @@ function createWindow() {
   }
 
   mainWindow = new BrowserWindow({
-    width: 1300,
-    height: 860,
-    minWidth: 1100,
-    minHeight: 720,
+    width: 1180,
+    height: 760,
+    minWidth: 980,
+    minHeight: 660,
     backgroundColor: "#050505",
     title: APP_NAME,
     icon,
