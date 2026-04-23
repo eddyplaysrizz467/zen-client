@@ -2,6 +2,19 @@
 
 Zen Client is a JavaScript + Electron Minecraft launcher.
 
+## Download (Windows)
+
+Get the latest `.exe` here:
+
+- https://github.com/eddyplaysrizz467/zen-client/releases/latest
+
+On the release page, download either:
+
+- `Zen Client <version>.exe` (portable single EXE), or
+- `Zen Client Setup <version>.exe` (installer)
+
+Tip: do not use "Code -> Download ZIP" unless you're developing. That's the source code.
+
 ## What it has
 
 - Vanilla, Fabric, and Quilt launch types
