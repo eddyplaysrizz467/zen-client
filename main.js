@@ -15,6 +15,7 @@ const LEGACY_STATE_FILE = path.join(app.getPath("appData"), "AeroClient", "launc
 const DEFAULT_ROOT = path.join(app.getPath("appData"), ".minecraft");
 const INSTALLER_DIR = path.join(APP_DIR, "installers");
 const DEFAULT_DISCORD_APP_ID = "1496668054803714058";
+const ZEN_CLIENT_MOD_FILENAME = "zen-client-fabric.jar";
 
 let mainWindow = null;
 let launchClient = null;
@@ -27,6 +28,16 @@ let updatePollTimer = null;
 
 function ensureDir(target) {
   fs.mkdirSync(target, { recursive: true });
+}
+
+function pickNewestFile(paths) {
+  const candidates = paths
+    .filter(Boolean)
+    .filter((item) => fs.existsSync(item))
+    .map((item) => ({ path: item, stat: fs.statSync(item) }));
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
+  return candidates[0].path;
 }
 
 function defaultState() {
@@ -847,6 +858,59 @@ async function ensureModrinthMods(minecraftRoot, minecraftVersion, launchType) {
   }
 }
 
+function resolveBundledZenClientModPath() {
+  const directCandidates = [
+    app.isPackaged ? path.join(process.resourcesPath, "bundled-mods", ZEN_CLIENT_MOD_FILENAME) : null,
+    path.join(__dirname, "bundled-mods", ZEN_CLIENT_MOD_FILENAME)
+  ];
+
+  const direct = pickNewestFile(directCandidates);
+  if (direct) return direct;
+
+  const devLibsDir = path.join(__dirname, "zen-client-mod", "build", "libs");
+  if (!fs.existsSync(devLibsDir)) return null;
+
+  const jars = fs
+    .readdirSync(devLibsDir)
+    .filter((file) => file.endsWith(".jar"))
+    .filter((file) => !file.endsWith("-sources.jar"))
+    .filter((file) => !file.endsWith("-dev.jar"))
+    .map((file) => path.join(devLibsDir, file));
+
+  return pickNewestFile(jars);
+}
+
+async function ensureZenClientMod(minecraftRoot, launchType) {
+  if (String(launchType || "").toLowerCase() !== "fabric") return;
+
+  const source = resolveBundledZenClientModPath();
+  if (!source) {
+    appendLog("[zen-mod] No bundled Zen Client Fabric mod was found. Skipping auto-install.");
+    return;
+  }
+
+  const modsDir = path.join(minecraftRoot, "mods");
+  ensureDir(modsDir);
+  const target = path.join(modsDir, ZEN_CLIENT_MOD_FILENAME);
+
+  const sourceStat = fs.statSync(source);
+  const targetStat = fs.existsSync(target) ? fs.statSync(target) : null;
+  const needsCopy =
+    !targetStat ||
+    targetStat.size !== sourceStat.size ||
+    Math.abs(targetStat.mtimeMs - sourceStat.mtimeMs) > 1000;
+
+  if (!needsCopy) return;
+
+  fs.copyFileSync(source, target);
+  try {
+    fs.utimesSync(target, sourceStat.atime, sourceStat.mtime);
+  } catch {
+    // ignore timestamp sync failures
+  }
+  appendLog(`[zen-mod] Installed bundled Zen Client mod -> ${path.basename(target)}`);
+}
+
 async function launchGame(settings) {
   const state = loadState();
   const account = state.accounts.find((item) => item.id === state.selectedAccountId);
@@ -870,6 +934,7 @@ async function launchGame(settings) {
     customVersion = await ensureQuiltInstall(minecraftRoot, javaPath, selectedVersion);
   }
 
+  await ensureZenClientMod(minecraftRoot, selectedType);
   // Auto-install requested performance mods for Fabric/Quilt.
   await ensureModrinthMods(minecraftRoot, selectedVersion, selectedType);
 

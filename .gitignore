@@ -13,6 +13,9 @@ yarn-error.log*
 dist/
 out/
 release/
+bundled-mods/
+zen-client-mod/.gradle/
+zen-client-mod/build/
 
 # OS/editor
 .DS_Store
