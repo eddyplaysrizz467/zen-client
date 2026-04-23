@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, nativeImage, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, nativeImage, Menu, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -234,10 +234,14 @@ function getDiscordActivity(state) {
   const base = { startTimestamp: Math.floor(now / 1000) };
 
   if (currentSession && settings.discordShowPlaying) {
+    const details = `Zen Client - ${currentSession.launchType || "Vanilla"}`;
+    let stateLine = `Playing ${currentSession.version || ""}`.trim();
+    if (currentSession.phase === "loading_peace") stateLine = "Loading peace...";
+    if (currentSession.phase === "have_fun") stateLine = "Have fun!";
     return {
       ...base,
-      details: `Playing ${currentSession.launchType} ${currentSession.version}`,
-      state: currentSession.username ? `Account: ${currentSession.username}` : "In game",
+      details,
+      state: stateLine || "In game",
       instance: false
     };
   }
@@ -253,6 +257,18 @@ function getDiscordActivity(state) {
   }
 
   return null;
+}
+
+function updateSessionPhaseFromLog(line) {
+  if (!currentSession) return;
+  const text = String(line || "").toLowerCase();
+  let next = null;
+  if (text.includes("joining server") || text.includes("connecting to")) next = "loading_peace";
+  if (text.includes("loading terrain")) next = "have_fun";
+  if (next && currentSession.phase !== next) {
+    currentSession.phase = next;
+    setDiscordPresence();
+  }
 }
 
 async function setDiscordPresence() {
@@ -772,7 +788,11 @@ async function launchGame(settings) {
 
   launchClient = new Client();
   launchClient.on("debug", (data) => appendLog(String(data)));
-  launchClient.on("data", (data) => appendLog(String(data).trim()));
+  launchClient.on("data", (data) => {
+    const line = String(data || "").trim();
+    if (line) updateSessionPhaseFromLog(line);
+    appendLog(line);
+  });
   launchClient.on("download", (data) => appendLog(`[download] ${data}`));
   launchClient.on("progress", (data) => {
     if (data?.task && typeof data.total === "number" && typeof data.current === "number") {
@@ -817,7 +837,8 @@ async function launchGame(settings) {
   currentSession = {
     launchType: selectedType,
     version: selectedVersion,
-    username: account.username
+    username: account.username,
+    phase: null
   };
   setDiscordPresence();
 
@@ -1015,6 +1036,88 @@ ipcMain.handle("account:microsoftLogin", async () => {
 ipcMain.handle("launch:start", async (_event, settings) => {
   await launchGame(settings);
   return true;
+});
+
+ipcMain.handle("shell:openExternal", async (_event, url) => {
+  const target = String(url || "").trim();
+  if (!target) throw new Error("Missing URL.");
+  await shell.openExternal(target);
+  return true;
+});
+
+async function modrinthFetchJson(url) {
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": "Zen Client"
+    }
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Modrinth request failed (${response.status}). ${text}`.trim());
+  }
+  return response.json();
+}
+
+function normalizeLoaderForModrinth(launchType) {
+  const normalized = String(launchType || "").toLowerCase();
+  if (normalized === "fabric") return "fabric";
+  if (normalized === "quilt") return "quilt";
+  return "";
+}
+
+ipcMain.handle("modrinth:install", async (_event, payload) => {
+  const projectId = String(payload?.projectId || "").trim();
+  const projectType = String(payload?.projectType || "").trim();
+  const minecraftRoot = String(payload?.minecraftDirectory || DEFAULT_ROOT).trim() || DEFAULT_ROOT;
+  const minecraftVersion = String(payload?.minecraftVersion || "").trim();
+  const launchType = String(payload?.launchType || "").trim();
+
+  if (!projectId) throw new Error("Missing Modrinth project id.");
+  if (projectType !== "mod" && projectType !== "resourcepack") throw new Error("Unsupported project type.");
+  if (!minecraftVersion) throw new Error("Pick a Minecraft version first.");
+
+  const loader = normalizeLoaderForModrinth(launchType);
+  if (projectType === "mod" && !loader) {
+    throw new Error("Switch Launch type to Fabric or Quilt to install mods.");
+  }
+
+  const versionsUrl = new URL(`https://api.modrinth.com/v2/project/${encodeURIComponent(projectId)}/version`);
+  versionsUrl.searchParams.set("game_versions", JSON.stringify([minecraftVersion]));
+  if (projectType === "mod") {
+    versionsUrl.searchParams.set("loaders", JSON.stringify([loader]));
+  }
+
+  let versions = await modrinthFetchJson(versionsUrl.toString());
+  if (!Array.isArray(versions) || versions.length === 0) {
+    // Fallback: try without loader/game filters (still picks latest).
+    const fallbackUrl = `https://api.modrinth.com/v2/project/${encodeURIComponent(projectId)}/version`;
+    versions = await modrinthFetchJson(fallbackUrl);
+  }
+
+  if (!Array.isArray(versions) || versions.length === 0) {
+    throw new Error("No compatible versions found on Modrinth for your selected settings.");
+  }
+
+  const chosen = versions[0];
+  const files = Array.isArray(chosen?.files) ? chosen.files : [];
+  const file = files.find((f) => f?.primary) || files[0];
+  const fileUrl = String(file?.url || "").trim();
+  const fileName = path.basename(String(file?.filename || "").trim() || "download.bin");
+  if (!fileUrl) throw new Error("No downloadable file returned by Modrinth.");
+
+  const targetDir = projectType === "mod" ? path.join(minecraftRoot, "mods") : path.join(minecraftRoot, "resourcepacks");
+  ensureDir(targetDir);
+  const outPath = path.join(targetDir, fileName);
+
+  appendLog(`[modrinth] Downloading ${projectType} ${projectId} -> ${outPath}`);
+  const response = await fetch(fileUrl);
+  if (!response.ok) {
+    throw new Error(`Download failed (${response.status}).`);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  fs.writeFileSync(outPath, buffer);
+  appendLog(`[modrinth] Installed ${fileName}`);
+  return { path: outPath, fileName };
 });
 
 ipcMain.handle("skin:getProfile", async () => {
