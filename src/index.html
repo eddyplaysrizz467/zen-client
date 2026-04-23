@@ -65,6 +65,14 @@
             <p>Pick your loader, version, and memory. Zen Client will save your choices and try to use the right Java automatically.</p>
           </div>
 
+          <div id="updateNotice" class="update-notice" hidden>
+            <div class="update-copy">
+              <div class="update-title">Zen Client update</div>
+              <div id="updateNoticeText" class="update-text"></div>
+            </div>
+            <button id="updateNoticeButton" class="primary" type="button" hidden>Yes</button>
+          </div>
+
           <div class="settings-grid">
             <label>
               Launch type
@@ -220,6 +228,7 @@
               <div id="skinPreviewBox" class="skin-preview-box">
                 <div class="empty-state">Select an account to load skin info.</div>
               </div>
+              <div id="skinPreviewMeta" class="skin-preview-meta"></div>
             </div>
 
             <div class="skin-actions">

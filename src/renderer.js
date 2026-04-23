@@ -27,7 +27,11 @@ const discordShowPlaying = document.getElementById("discordShowPlaying");
 const installMenuPackButton = document.getElementById("installMenuPackButton");
 
 const skinPreviewBox = document.getElementById("skinPreviewBox");
+const skinPreviewMeta = document.getElementById("skinPreviewMeta");
 const refreshSkinButton = document.getElementById("refreshSkinButton");
+const updateNotice = document.getElementById("updateNotice");
+const updateNoticeText = document.getElementById("updateNoticeText");
+const updateNoticeButton = document.getElementById("updateNoticeButton");
 
 const refreshModsButton = document.getElementById("refreshModsButton");
 const refreshPacksButton = document.getElementById("refreshPacksButton");
@@ -53,6 +57,8 @@ let busy = false;
 let libraryBusy = false;
 let modrinthMods = [];
 let modrinthPacks = [];
+let updateStatus = null;
+let skinRenderNonce = 0;
 
 function setBusy(nextBusy) {
   busy = nextBusy;
@@ -170,20 +176,94 @@ function skinHeadUrl(account) {
   return "";
 }
 
-function renderSkinHead() {
-  const selected = getSelectedAccount();
-  if (!selected) {
-    skinPreviewBox.innerHTML = `<div class="empty-state">Select an account to load skin info.</div>`;
+function headPreviewCandidates(account, profile) {
+  const username = String(profile?.name || account?.username || "").trim();
+  const rawUuid = String(profile?.id || account?.uuid || "").trim();
+  const cleanUuid = rawUuid.replace(/-/g, "");
+  const stamp = Date.now();
+  const urls = [];
+
+  if (cleanUuid) {
+    urls.push(`https://crafatar.com/avatars/${encodeURIComponent(cleanUuid)}?size=128&overlay&cb=${stamp}`);
+    urls.push(`https://mc-heads.net/avatar/${encodeURIComponent(cleanUuid)}/128`);
+  }
+  if (username) {
+    urls.push(`https://minotar.net/helm/${encodeURIComponent(username)}/128.png?cb=${stamp}`);
+    urls.push(`https://mc-heads.net/avatar/${encodeURIComponent(username)}/128`);
+  }
+  return urls;
+}
+
+async function loadFirstWorkingImage(urls) {
+  for (const url of urls) {
+    try {
+      await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.referrerPolicy = "no-referrer";
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = url;
+      });
+      return url;
+    } catch {
+      // Keep trying fallbacks.
+    }
+  }
+  return "";
+}
+
+function renderUpdateNotice() {
+  if (!updateStatus?.visible || !updateStatus?.message) {
+    updateNotice.hidden = true;
+    updateNoticeButton.hidden = true;
+    updateNoticeText.textContent = "";
     return;
   }
 
-  const url = skinHeadUrl(selected);
+  updateNotice.hidden = false;
+  updateNoticeText.textContent = updateStatus.message;
+  updateNoticeButton.disabled = false;
+
+  if (updateStatus.action === "download" || updateStatus.action === "install") {
+    updateNoticeButton.hidden = false;
+    updateNoticeButton.textContent = "Yes";
+  } else {
+    updateNoticeButton.hidden = true;
+  }
+}
+
+async function renderSkinHead() {
+  const nonce = ++skinRenderNonce;
+  const selected = getSelectedAccount();
+  if (!selected) {
+    skinPreviewBox.innerHTML = `<div class="empty-state">Select an account to load skin info.</div>`;
+    skinPreviewMeta.textContent = "";
+    return;
+  }
+
+  skinPreviewBox.innerHTML = `<div class="empty-state">Loading skin preview...</div>`;
+  skinPreviewMeta.textContent = selected.type === "microsoft" ? "Checking your current skin..." : selected.username;
+
+  let profile = null;
+  if (selected.type === "microsoft") {
+    try {
+      profile = await window.aeroApi.getSkinProfile();
+    } catch {
+      profile = null;
+    }
+  }
+
+  const url = await loadFirstWorkingImage(headPreviewCandidates(selected, profile));
+  if (nonce !== skinRenderNonce) return;
+
   if (!url) {
     skinPreviewBox.innerHTML = `<div class="empty-state">No skin info available for this account.</div>`;
+    skinPreviewMeta.textContent = selected.username || "";
     return;
   }
 
   skinPreviewBox.innerHTML = `<img alt="Minecraft skin head preview" referrerpolicy="no-referrer" src="${url}" />`;
+  skinPreviewMeta.textContent = String(profile?.name || selected.username || "").trim();
 }
 
 function normalizeBackgroundPreset(presetValue) {
@@ -215,12 +295,14 @@ function appendLog(message) {
 
 function syncFromState(nextState) {
   state = nextState;
+  updateStatus = nextState.updateStatus || updateStatus;
   applyBackgroundPreset(state?.settings?.backgroundPreset);
   logBox.textContent = "";
   (state.log || []).forEach((line) => appendLog(line));
   renderAccounts();
   renderSettings();
   renderHero();
+  renderUpdateNotice();
 }
 
 function collectSettings() {
@@ -355,6 +437,21 @@ installMenuPackButton.addEventListener("click", async () => {
 });
 
 refreshSkinButton.addEventListener("click", () => renderSkinHead());
+updateNoticeButton.addEventListener("click", async () => {
+  if (!updateStatus?.action) return;
+  updateNoticeButton.disabled = true;
+  try {
+    if (updateStatus.action === "download") {
+      await window.aeroApi.startUpdateDownload();
+    } else if (updateStatus.action === "install") {
+      await window.aeroApi.installUpdateNow();
+    }
+  } catch (error) {
+    statusText.textContent = `Problem: ${error.message}`;
+  } finally {
+    updateNoticeButton.disabled = false;
+  }
+});
 
 function formatDownloads(value) {
   const num = Number(value || 0);
@@ -537,6 +634,11 @@ window.aeroApi.onStateUpdated((nextState) => {
   const stored = localStorage.getItem("aeroTab");
   if (stored === "skins") renderSkinHead();
   if (stored === "library") ensureLibraryLoaded().catch(() => {});
+});
+
+window.aeroApi.onUpdateStatus((nextStatus) => {
+  updateStatus = nextStatus;
+  renderUpdateNotice();
 });
 
 window.aeroApi.onProgress((payload) => {

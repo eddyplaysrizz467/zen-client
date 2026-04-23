@@ -47,16 +47,16 @@ function drawSoftDot(png, x, y, radius, rgba) {
 function drawEnso(png, cx, cy, baseRadius, seed) {
   const rng = mulberry32(seed);
   const white = [245, 245, 245, 235];
-  const start = 0.2 * Math.PI;
-  const end = 2 * Math.PI - 0.22 * Math.PI;
+  const start = 0.1 * Math.PI;
+  const end = 1.84 * Math.PI;
   const steps = 1200;
 
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
     const a = start + (end - start) * t;
-    const wobble = (rng() - 0.5) * 3.2 + Math.sin(a * 3) * 1.4;
+    const wobble = (rng() - 0.5) * 4.4 + Math.sin(a * 3.2) * 1.8;
     const radius = baseRadius + wobble;
-    const thick = 11 + (rng() - 0.5) * 5.5 + (1 - t) * 1.6;
+    const thick = 12.5 + (rng() - 0.5) * 6.5 + (1 - t) * 2.1;
     const dotR = Math.max(2.2, thick / 3.1);
     const alpha = Math.round(170 + rng() * 70);
     const x = cx + Math.cos(a) * radius;
@@ -94,7 +94,7 @@ async function main() {
       const dx = (x - cx) / cx;
       const dy = (y - cy) / cy;
       const vignette = Math.min(1, Math.sqrt(dx * dx + dy * dy));
-      const base = 16 - Math.round(vignette * 8);
+      const base = 14 - Math.round(vignette * 6);
       const idx = (size * y + x) << 2;
       png.data[idx] = base;
       png.data[idx + 1] = base;

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, nativeImage, Menu, shell, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, nativeImage, Menu, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -25,6 +25,15 @@ let discordConnecting = false;
 let currentSession = null;
 let logBuffer = [];
 let updatePollTimer = null;
+let currentUpdateState = {
+  stage: "idle",
+  version: "",
+  message: "",
+  progressPercent: null,
+  action: null,
+  visible: false
+};
+let autoUpdaterRef = null;
 
 function ensureDir(target) {
   fs.mkdirSync(target, { recursive: true });
@@ -105,6 +114,14 @@ function saveState(state) {
 function appendLog(message) {
   logBuffer = [...logBuffer, message].slice(-200);
   sendEvent("launcher-log", { message });
+}
+
+function setUpdateState(patch) {
+  currentUpdateState = {
+    ...currentUpdateState,
+    ...patch
+  };
+  sendEvent("update-status", currentUpdateState);
 }
 
 function sendEvent(channel, payload) {
@@ -228,99 +245,84 @@ function initAutoUpdater() {
   // Auto-updater only makes sense for packaged installer builds.
   if (!app.isPackaged) return;
 
-  let autoUpdater = null;
   try {
-    ({ autoUpdater } = require("electron-updater"));
+    ({ autoUpdater: autoUpdaterRef } = require("electron-updater"));
   } catch (error) {
     appendLog(`[update] Auto-updater unavailable: ${error?.message || String(error)}`);
     return;
   }
 
-  autoUpdater.autoDownload = false;
-  autoUpdater.logger = null;
-
-  let updatePromptOpen = false;
+  autoUpdaterRef.autoDownload = false;
+  autoUpdaterRef.logger = null;
   let updateDownloadStarted = false;
-  let updateReadyPromptShown = false;
 
-  async function promptToDownloadUpdate(version) {
-    if (updatePromptOpen || updateDownloadStarted) return;
-    updatePromptOpen = true;
-    try {
-      const result = await dialog.showMessageBox(mainWindow, {
-        type: "info",
-        buttons: ["Yes"],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true,
-        title: "Update available",
-        message: `Zen Client ${version || "update"} is available.`,
-        detail: "Would you like to update now?"
-      });
-      if (result.response === 0) {
-        updateDownloadStarted = true;
-        appendLog("[update] Starting update download...");
-        await autoUpdater.downloadUpdate();
-      }
-    } catch (error) {
-      appendLog(`[update] Could not start update: ${error?.message || String(error)}`);
-      updateDownloadStarted = false;
-    } finally {
-      updatePromptOpen = false;
-    }
-  }
-
-  async function promptToInstallUpdate(version) {
-    if (updateReadyPromptShown) return;
-    updateReadyPromptShown = true;
-    try {
-      const result = await dialog.showMessageBox(mainWindow, {
-        type: "info",
-        buttons: ["Yes"],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true,
-        title: "Update ready",
-        message: `Zen Client ${version || "update"} is ready to install.`,
-        detail: "Would you like to update now?"
-      });
-      if (result.response === 0) {
-        appendLog("[update] Installing update now...");
-        autoUpdater.quitAndInstall();
-      }
-    } catch (error) {
-      appendLog(`[update] Could not install update: ${error?.message || String(error)}`);
-      updateReadyPromptShown = false;
-    }
-  }
-
-  autoUpdater.on("checking-for-update", () => appendLog("[update] Checking for updates..."));
-  autoUpdater.on("update-available", (info) => {
-    appendLog(`[update] Update available: ${info?.version || "new version"}`);
-    promptToDownloadUpdate(info?.version).catch(() => {});
+  autoUpdaterRef.on("checking-for-update", () => {
+    setUpdateState({
+      stage: "checking",
+      visible: false,
+      action: null,
+      message: "",
+      progressPercent: null
+    });
   });
-  autoUpdater.on("update-not-available", () => appendLog("[update] No updates available."));
-  autoUpdater.on("error", (err) => {
-    appendLog(`[update] Error: ${err?.message || String(err)}`);
+  autoUpdaterRef.on("update-available", (info) => {
+    setUpdateState({
+      stage: "available",
+      version: info?.version || "",
+      visible: true,
+      action: "download",
+      message: `Zen Client ${info?.version || "update"} is available.`,
+      progressPercent: null
+    });
+  });
+  autoUpdaterRef.on("update-not-available", () => {
+    setUpdateState({
+      stage: "idle",
+      visible: false,
+      action: null,
+      message: "",
+      progressPercent: null
+    });
+  });
+  autoUpdaterRef.on("error", (err) => {
     updateDownloadStarted = false;
+    setUpdateState({
+      stage: "error",
+      visible: true,
+      action: null,
+      message: `Update problem: ${err?.message || String(err)}`,
+      progressPercent: null
+    });
   });
-  autoUpdater.on("download-progress", (p) => {
+  autoUpdaterRef.on("download-progress", (p) => {
     const pct = typeof p?.percent === "number" ? p.percent.toFixed(0) : "?";
-    appendLog(`[update] Downloading... ${pct}%`);
+    setUpdateState({
+      stage: "downloading",
+      visible: true,
+      action: null,
+      message: `Downloading update... ${pct}%`,
+      progressPercent: Number.isFinite(Number(p?.percent)) ? Math.round(Number(p.percent)) : null
+    });
   });
-  autoUpdater.on("update-downloaded", (info) => {
-    appendLog("[update] Update downloaded.");
-    promptToInstallUpdate(info?.version).catch(() => {});
+  autoUpdaterRef.on("update-downloaded", (info) => {
+    setUpdateState({
+      stage: "downloaded",
+      version: info?.version || "",
+      visible: true,
+      action: "install",
+      message: `Zen Client ${info?.version || "update"} is ready to install.`,
+      progressPercent: 100
+    });
   });
 
   // Kick off once shortly after the window exists.
   setTimeout(() => {
-    autoUpdater.checkForUpdates().catch(() => {});
+    autoUpdaterRef.checkForUpdates().catch(() => {});
   }, 2500);
 
   if (updatePollTimer) clearInterval(updatePollTimer);
   updatePollTimer = setInterval(() => {
-    autoUpdater.checkForUpdates().catch(() => {});
+    autoUpdaterRef.checkForUpdates().catch(() => {});
   }, 10_000);
 }
 
@@ -435,7 +437,8 @@ function getClientState() {
     accounts: state.accounts.map(sanitizeAccount),
     selectedAccountId: state.selectedAccountId,
     settings: state.settings,
-    log: logBuffer
+    log: logBuffer,
+    updateStatus: currentUpdateState
   };
 }
 
@@ -1292,6 +1295,32 @@ ipcMain.handle("modrinth:install", async (_event, payload) => {
   fs.writeFileSync(outPath, buffer);
   appendLog(`[modrinth] Installed ${fileName}`);
   return { path: outPath, fileName };
+});
+
+ipcMain.handle("update:startDownload", async () => {
+  if (!autoUpdaterRef) throw new Error("Auto-update is only available in the installed build.");
+  setUpdateState({
+    stage: "downloading",
+    visible: true,
+    action: null,
+    message: "Downloading update...",
+    progressPercent: 0
+  });
+  await autoUpdaterRef.downloadUpdate();
+  return true;
+});
+
+ipcMain.handle("update:installNow", async () => {
+  if (!autoUpdaterRef) throw new Error("Auto-update is only available in the installed build.");
+  setUpdateState({
+    stage: "installing",
+    visible: true,
+    action: null,
+    message: "Installing update...",
+    progressPercent: 100
+  });
+  autoUpdaterRef.quitAndInstall();
+  return true;
 });
 
 ipcMain.handle("skin:getProfile", async () => {
