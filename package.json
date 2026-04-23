@@ -1,13 +1,13 @@
 {
   "name": "zen-client",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Zen Client Minecraft launcher rebuilt in JavaScript and Electron.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "icons": "node scripts/generate-icons.js",
     "dist": "npm run icons && electron-builder --win nsis",
-    "release": "npm run icons && electron-builder --win nsis --publish always"
+    "release": "npm run icons && electron-builder --win nsis"
   },
   "keywords": [
     "minecraft",
