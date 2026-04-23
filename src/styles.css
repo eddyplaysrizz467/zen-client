@@ -548,31 +548,14 @@ input::placeholder {
 
 /* Removed bubbles + pandas per request. */
 .zen-logo {
-  width: 3.1rem;
-  height: 3.1rem;
-  border-radius: 999px;
-  position: relative;
-  display: grid;
-  place-items: center;
-  background: radial-gradient(circle at 40% 35%, rgba(255, 255, 255, 0.65), rgba(255, 255, 255, 0.12));
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 1.1rem;
+  display: block;
+  background-color: rgba(10, 10, 10, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow: 0 18px 26px rgba(0, 0, 0, 0.28);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-}
-
-.zen-logo::before {
-  content: "";
-  width: 2.3rem;
-  height: 2.3rem;
-  border-radius: 999px;
-  border: 3px solid rgba(255, 255, 255, 0.85);
-  box-shadow: inset 0 0 0 4px rgba(0, 0, 0, 0.72);
-}
-
-.zen-logo::after {
-  content: "";
-  position: absolute;
-  width: 1rem;
-  height: 1rem;
-  border-radius: 999px;
-  border: 3px solid rgba(255, 255, 255, 0.85);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2264%22%20height%3D%2264%22%20viewBox%3D%220%200%2064%2064%22%3E%3Cdefs%3E%3Cfilter%20id%3D%22ink%22%20x%3D%22-30%25%22%20y%3D%22-30%25%22%20width%3D%22160%25%22%20height%3D%22160%25%22%3E%3CfeTurbulence%20type%3D%22fractalNoise%22%20baseFrequency%3D%220.9%22%20numOctaves%3D%222%22%20seed%3D%227%22%20result%3D%22noise%22/%3E%3CfeDisplacementMap%20in%3D%22SourceGraphic%22%20in2%3D%22noise%22%20scale%3D%221.4%22%20xChannelSelector%3D%22R%22%20yChannelSelector%3D%22G%22/%3E%3CfeGaussianBlur%20stdDeviation%3D%220.25%22/%3E%3C/filter%3E%3CradialGradient%20id%3D%22paper%22%20cx%3D%2240%25%22%20cy%3D%2230%25%22%20r%3D%2270%25%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23151515%22/%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%230a0a0a%22/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2212%22%20fill%3D%22url(%23paper)%22/%3E%3Cpath%20d%3D%22M%2046%2017%20C%2038%209%2C%2020%2011%2C%2015%2023%20C%2010%2035%2C%2017%2050%2C%2030%2052%20C%2042%2054%2C%2054%2044%2C%2052%2031%20C%2050%2021%2C%2040%2015%2C%2033%2016%22%20fill%3D%22none%22%20stroke%3D%22%23f4f4f4%22%20stroke-width%3D%227.8%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20opacity%3D%220.95%22%20filter%3D%22url(%23ink)%22/%3E%3Cpath%20d%3D%22M%2047%2018%20C%2040%2011%2C%2023%2012%2C%2017%2024%20C%2012%2036%2C%2018%2049%2C%2030%2051%20C%2042%2053%2C%2052%2045%2C%2051%2033%22%20fill%3D%22none%22%20stroke%3D%22%23f4f4f4%22%20stroke-width%3D%223.2%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20opacity%3D%220.22%22%20filter%3D%22url(%23ink)%22/%3E%3C/svg%3E");
+  background-size: cover;
+  background-position: center;
 }
