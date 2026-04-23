@@ -1,13 +1,13 @@
 {
   "name": "zen-client",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Zen Client Minecraft launcher rebuilt in JavaScript and Electron.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "icons": "node scripts/generate-icons.js",
-    "dist": "npm run icons && electron-builder --win nsis",
-    "release": "npm run icons && electron-builder --win nsis"
+    "dist": "npm run icons && electron-builder --win",
+    "release": "npm run icons && electron-builder --win"
   },
   "keywords": [
     "minecraft",
@@ -22,10 +22,16 @@
     "appId": "com.eddyplaysrizz467.zenclient",
     "productName": "Zen Client",
     "files": [
-      "main.js",
-      "preload.js",
-      "src/**",
-      "package.json"
+      "**/*",
+      "!dist/**",
+      "!out/**",
+      "!release/**",
+      "!scripts/**",
+      "!.github/**",
+      "!**/*.map",
+      "!**/.git/**",
+      "!**/.venv/**",
+      "!**/__pycache__/**"
     ],
     "directories": {
       "buildResources": "build",
