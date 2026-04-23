@@ -15,6 +15,7 @@ const STATE_FILE = path.join(APP_DIR, "launcher-state.json");
 const LEGACY_STATE_FILE = path.join(app.getPath("appData"), "AeroClient", "launcher-state.json");
 const DEFAULT_ROOT = path.join(app.getPath("appData"), ".minecraft");
 const INSTALLER_DIR = path.join(APP_DIR, "installers");
+const DEFAULT_DISCORD_APP_ID = "1496668054803714058";
 
 let mainWindow = null;
 let launchClient = null;
@@ -39,8 +40,8 @@ function defaultState() {
       javaPath: "",
       memoryMb: 4096,
       backgroundPreset: "ink",
-      discordPresenceEnabled: false,
-      discordAppId: "",
+      discordPresenceEnabled: true,
+      discordAppId: DEFAULT_DISCORD_APP_ID,
       discordShowLauncher: true,
       discordShowPlaying: true
     },
@@ -64,7 +65,7 @@ function loadState() {
       // Logs are session-only: never load them from disk.
       delete raw.log;
     }
-    return {
+    const merged = {
       ...defaultState(),
       ...raw,
       settings: {
@@ -72,6 +73,11 @@ function loadState() {
         ...(raw.settings || {})
       }
     };
+    // Ensure a default Discord App ID exists so Rich Presence works out of the box.
+    if (!String(merged.settings.discordAppId || "").trim()) {
+      merged.settings.discordAppId = DEFAULT_DISCORD_APP_ID;
+    }
+    return merged;
   } catch {
     return defaultState();
   }
@@ -224,7 +230,7 @@ function getDiscordActivity(state) {
 async function setDiscordPresence() {
   const state = loadState();
   const settings = state.settings || {};
-  const clientId = String(settings.discordAppId || "").trim();
+  const clientId = String(settings.discordAppId || DEFAULT_DISCORD_APP_ID || "").trim();
   const activity = getDiscordActivity(state);
 
   if (!activity || !clientId) {
