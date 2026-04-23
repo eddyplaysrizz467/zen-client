@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, nativeImage, Menu, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, nativeImage, Menu, shell, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -23,6 +23,7 @@ let discordReady = false;
 let discordConnecting = false;
 let currentSession = null;
 let logBuffer = [];
+let updatePollTimer = null;
 
 function ensureDir(target) {
   fs.mkdirSync(target, { recursive: true });
@@ -189,32 +190,92 @@ function initAutoUpdater() {
     return;
   }
 
-  autoUpdater.autoDownload = true;
+  autoUpdater.autoDownload = false;
   autoUpdater.logger = null;
 
+  let updatePromptOpen = false;
+  let updateDownloadStarted = false;
+  let updateReadyPromptShown = false;
+
+  async function promptToDownloadUpdate(version) {
+    if (updatePromptOpen || updateDownloadStarted) return;
+    updatePromptOpen = true;
+    try {
+      const result = await dialog.showMessageBox(mainWindow, {
+        type: "info",
+        buttons: ["Yes"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+        title: "Update available",
+        message: `Zen Client ${version || "update"} is available.`,
+        detail: "Would you like to update now?"
+      });
+      if (result.response === 0) {
+        updateDownloadStarted = true;
+        appendLog("[update] Starting update download...");
+        await autoUpdater.downloadUpdate();
+      }
+    } catch (error) {
+      appendLog(`[update] Could not start update: ${error?.message || String(error)}`);
+      updateDownloadStarted = false;
+    } finally {
+      updatePromptOpen = false;
+    }
+  }
+
+  async function promptToInstallUpdate(version) {
+    if (updateReadyPromptShown) return;
+    updateReadyPromptShown = true;
+    try {
+      const result = await dialog.showMessageBox(mainWindow, {
+        type: "info",
+        buttons: ["Yes"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+        title: "Update ready",
+        message: `Zen Client ${version || "update"} is ready to install.`,
+        detail: "Would you like to update now?"
+      });
+      if (result.response === 0) {
+        appendLog("[update] Installing update now...");
+        autoUpdater.quitAndInstall();
+      }
+    } catch (error) {
+      appendLog(`[update] Could not install update: ${error?.message || String(error)}`);
+      updateReadyPromptShown = false;
+    }
+  }
+
   autoUpdater.on("checking-for-update", () => appendLog("[update] Checking for updates..."));
-  autoUpdater.on("update-available", (info) => appendLog(`[update] Update available: ${info?.version || "new version"}`));
+  autoUpdater.on("update-available", (info) => {
+    appendLog(`[update] Update available: ${info?.version || "new version"}`);
+    promptToDownloadUpdate(info?.version).catch(() => {});
+  });
   autoUpdater.on("update-not-available", () => appendLog("[update] No updates available."));
-  autoUpdater.on("error", (err) => appendLog(`[update] Error: ${err?.message || String(err)}`));
+  autoUpdater.on("error", (err) => {
+    appendLog(`[update] Error: ${err?.message || String(err)}`);
+    updateDownloadStarted = false;
+  });
   autoUpdater.on("download-progress", (p) => {
     const pct = typeof p?.percent === "number" ? p.percent.toFixed(0) : "?";
     appendLog(`[update] Downloading... ${pct}%`);
   });
-  autoUpdater.on("update-downloaded", () => {
-    appendLog("[update] Update downloaded. Restarting to install...");
-    setTimeout(() => {
-      try {
-        autoUpdater.quitAndInstall();
-      } catch {
-        // ignore
-      }
-    }, 1200);
+  autoUpdater.on("update-downloaded", (info) => {
+    appendLog("[update] Update downloaded.");
+    promptToInstallUpdate(info?.version).catch(() => {});
   });
 
   // Kick off once shortly after the window exists.
   setTimeout(() => {
     autoUpdater.checkForUpdates().catch(() => {});
   }, 2500);
+
+  if (updatePollTimer) clearInterval(updatePollTimer);
+  updatePollTimer = setInterval(() => {
+    autoUpdater.checkForUpdates().catch(() => {});
+  }, 10_000);
 }
 
 function sanitizeAccount(account) {
