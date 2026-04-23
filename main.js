@@ -1141,6 +1141,19 @@ ipcMain.handle("shell:openExternal", async (_event, url) => {
   return true;
 });
 
+ipcMain.handle("shell:openFolder", async (_event, payload) => {
+  const root = String(payload?.minecraftDirectory || DEFAULT_ROOT).trim() || DEFAULT_ROOT;
+  const kind = String(payload?.kind || "mods").trim().toLowerCase();
+  const folderName = kind === "resourcepacks" ? "resourcepacks" : "mods";
+  const targetDir = path.join(root, folderName);
+  ensureDir(targetDir);
+  const result = await shell.openPath(targetDir);
+  if (result) {
+    throw new Error(result);
+  }
+  return { path: targetDir };
+});
+
 async function modrinthFetchJson(url) {
   const response = await fetch(url, {
     headers: {

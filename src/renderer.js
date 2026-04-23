@@ -31,6 +31,7 @@ const refreshSkinButton = document.getElementById("refreshSkinButton");
 
 const refreshModsButton = document.getElementById("refreshModsButton");
 const refreshPacksButton = document.getElementById("refreshPacksButton");
+const openModsFolderButton = document.getElementById("openModsFolderButton");
 const modsSearch = document.getElementById("modsSearch");
 const packsSearch = document.getElementById("packsSearch");
 const modsList = document.getElementById("modsList");
@@ -489,6 +490,19 @@ async function ensureLibraryLoaded() {
 refreshModsButton.addEventListener("click", () => {
   modrinthMods = [];
   ensureLibraryLoaded().catch(() => {});
+});
+
+openModsFolderButton.addEventListener("click", async () => {
+  const settings = collectSettings();
+  try {
+    const result = await window.aeroApi.openFolder({
+      minecraftDirectory: settings.minecraftDirectory,
+      kind: "mods"
+    });
+    statusText.textContent = `Opened mods folder: ${result.path}`;
+  } catch (error) {
+    statusText.textContent = `Problem: ${error.message}`;
+  }
 });
 
 refreshPacksButton.addEventListener("click", () => {

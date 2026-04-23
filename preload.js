@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld("aeroApi", {
   uploadSkin: (payload) => invoke("skin:upload", payload),
   installAeroMenuPack: (payload) => invoke("resourcepack:installAeroMenu", payload),
   openExternal: (url) => invoke("shell:openExternal", url),
+  openFolder: (payload) => invoke("shell:openFolder", payload),
   installModrinth: (payload) => invoke("modrinth:install", payload),
   onLog: (handler) => ipcRenderer.on("launcher-log", (_event, payload) => handler(payload)),
   onStateUpdated: (handler) => ipcRenderer.on("state-updated", (_event, payload) => handler(payload)),

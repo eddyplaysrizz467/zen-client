@@ -603,6 +603,13 @@ input::placeholder {
   gap: 0.8rem;
 }
 
+.library-title-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
 .library-title {
   font-weight: 800;
   color: var(--text-soft);
