@@ -28,8 +28,16 @@ jobs:
       - name: Generate icons
         run: npm run icons
 
-      - name: Build and publish to GitHub Releases
+      - name: Build installer (NSIS)
+        run: npm run dist
+
+      - name: Create GitHub Release + upload installer assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.exe
+            dist/*.yml
+            dist/*.blockmap
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run release
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

@@ -107,7 +107,7 @@ function renderSettings() {
   memoryMb.value = state.settings.memoryMb || 4096;
   minecraftDirectory.value = state.settings.minecraftDirectory || "";
   javaPath.value = state.settings.javaPath || "";
-  backgroundPreset.value = state.settings.backgroundPreset || "coral";
+  backgroundPreset.value = normalizeBackgroundPreset(state.settings.backgroundPreset);
   discordEnabled.value = state.settings.discordPresenceEnabled ? "on" : "off";
   discordAppId.value = state.settings.discordAppId || "";
   discordShowLauncher.value = state.settings.discordShowLauncher ? "on" : "off";
@@ -146,8 +146,16 @@ function renderHero() {
   }
 }
 
+function normalizeBackgroundPreset(presetValue) {
+  const normalized = String(presetValue || "").toLowerCase();
+  if (normalized === "ink") return "ink";
+  if (normalized === "stone") return "stone";
+  if (normalized === "bamboo") return "bamboo";
+  return "ink";
+}
+
 function applyBackgroundPreset(presetValue) {
-  const preset = String(presetValue || "coral").toLowerCase();
+  const preset = normalizeBackgroundPreset(presetValue);
   document.documentElement.dataset.preset = preset;
 }
 

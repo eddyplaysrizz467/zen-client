@@ -16,6 +16,21 @@
   --coral-a: #ffffff;
   --coral-b: #d8d8d8;
   --kelp: #bdbdbd;
+  --radius-xl: 1.6rem;
+  --radius-lg: 1.25rem;
+  --radius-md: 1rem;
+  --radius-pill: 999px;
+  --border: 1px solid rgba(255, 255, 255, 0.1);
+  --border-soft: 1px solid rgba(255, 255, 255, 0.06);
+  --shadow-lg: 0 18px 45px rgba(0, 0, 0, 0.24);
+  --shadow-md: 0 14px 28px rgba(0, 0, 0, 0.22);
+  --ring: 0 0 0 3px rgba(255, 255, 255, 0.28);
+  --ring-soft: 0 0 0 2px rgba(255, 255, 255, 0.18);
+}
+
+html {
+  /* Makes native form popups (like <select> dropdowns) use dark styling on Windows. */
+  color-scheme: dark;
 }
 
 html[data-preset="ink"] {
@@ -52,6 +67,8 @@ html, body {
   font-family: "Segoe UI", system-ui, sans-serif;
   color: var(--text);
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
   background:
     radial-gradient(circle at top right, var(--bg-highlight), transparent 28%),
     linear-gradient(180deg, var(--bg-deep) 0%, var(--bg-mid) 58%, var(--bg-light) 100%);
@@ -59,6 +76,32 @@ html, body {
 
 body {
   position: relative;
+}
+
+/* Subtle, consistent scrollbars for internal panes (accounts/log). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.22);
 }
 
 .scene {
@@ -165,16 +208,23 @@ html[data-preset="bamboo"] .scene::before {
   align-items: end;
   gap: 1.5rem;
   background: rgba(10, 10, 10, 0.74);
-  border-radius: 1.5rem;
+  border-radius: var(--radius-xl);
   padding: 1.5rem 1.6rem;
   backdrop-filter: blur(10px);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.24);
+  box-shadow: var(--shadow-lg);
+  border: var(--border-soft);
 }
 
 .brand {
   display: flex;
   gap: 1rem;
   align-items: center;
+}
+
+.brand > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 
 .brand h1 {
@@ -186,7 +236,7 @@ html[data-preset="bamboo"] .scene::before {
 .brand p,
 .hero-help,
 .card-head p {
-  margin: 0.35rem 0 0;
+  margin: 0;
   color: var(--text-soft);
   line-height: 1.45;
 }
@@ -205,20 +255,31 @@ html[data-preset="bamboo"] .scene::before {
   gap: 0.6rem;
   align-items: center;
   background: rgba(255, 255, 255, 0.06);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0.45rem;
   width: fit-content;
   backdrop-filter: blur(10px);
-  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.22);
+  box-shadow: var(--shadow-md);
+  border: var(--border-soft);
 }
 
 .tab-button {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0.6rem 1.1rem;
   background: transparent;
   color: var(--text-soft);
   font-weight: 800;
   letter-spacing: 0.02em;
+  transition: background 140ms ease, color 140ms ease, transform 140ms ease, filter 140ms ease;
+}
+
+.tab-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.tab-button:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-soft);
 }
 
 .tab-button.active {
@@ -246,10 +307,17 @@ html[data-preset="bamboo"] .scene::before {
 .card {
   background: var(--card);
   backdrop-filter: blur(12px);
-  border-radius: 1.6rem;
+  border-radius: var(--radius-xl);
   padding: 1.35rem;
-  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.24);
+  box-shadow: var(--shadow-lg);
+  border: var(--border-soft);
   min-height: 0;
+}
+
+.card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 
 .card-head h2,
@@ -273,21 +341,27 @@ html[data-preset="bamboo"] .scene::before {
   gap: 0.65rem;
   overflow: auto;
   min-height: 12rem;
+  padding-right: 0.25rem;
 }
 
 .account-item {
   background: var(--card-soft);
   border: none;
-  border-radius: 1.1rem;
+  border-radius: var(--radius-md);
   color: var(--text);
   text-align: left;
   padding: 0.9rem 1rem;
   cursor: pointer;
-  transition: transform 140ms ease, background 140ms ease;
+  transition: transform 140ms ease, background 140ms ease, box-shadow 140ms ease;
 }
 
 .account-item:hover {
   transform: translateY(-1px);
+}
+
+.account-item:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
 
 .account-item.selected {
@@ -324,17 +398,27 @@ html[data-preset="bamboo"] .scene::before {
 button {
   appearance: none;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0.8rem 1.15rem;
   font: inherit;
   font-weight: 700;
   cursor: pointer;
-  transition: transform 140ms ease, filter 140ms ease;
+  line-height: 1.15;
+  transition: transform 140ms ease, filter 140ms ease, background 140ms ease, box-shadow 140ms ease;
 }
 
 button:hover {
   transform: translateY(-1px);
   filter: brightness(1.05);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+button:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
 
 button:disabled {
@@ -363,8 +447,9 @@ button.wide {
   flex-direction: column;
   gap: 0.85rem;
   background: var(--card-soft);
-  border-radius: 1.25rem;
+  border-radius: var(--radius-lg);
   padding: 1rem;
+  border: var(--border-soft);
 }
 
 label {
@@ -378,12 +463,31 @@ label {
 input,
 select {
   border: none;
-  border-radius: 1rem;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.06);
   color: var(--text);
   padding: 0.8rem 0.9rem;
   font: inherit;
   outline: none;
+  border: var(--border-soft);
+  transition: background 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+
+input:focus-visible,
+select:focus-visible {
+  box-shadow: var(--ring-soft);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+select {
+  color-scheme: dark;
+}
+
+/* Helps on some Chromium builds (not always honored for native popups). */
+option,
+optgroup {
+  background-color: #0f0f0f;
+  color: #f2f2f2;
 }
 
 input::placeholder {
@@ -410,9 +514,10 @@ input::placeholder {
   display: flex;
   flex-direction: column;
   background: var(--card-soft);
-  border-radius: 1.3rem;
+  border-radius: var(--radius-lg);
   padding: 1rem;
   overflow: hidden;
+  border: var(--border-soft);
 }
 
 .status-text {
@@ -429,10 +534,13 @@ input::placeholder {
 .log-box {
   flex: 1;
   margin: 0.9rem 0 0;
-  padding: 0;
-  background: transparent;
+  padding: 0.85rem 0.9rem;
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: var(--radius-md);
+  border: var(--border-soft);
   color: var(--text);
   white-space: pre-wrap;
+  word-break: break-word;
   overflow: auto;
   font: 0.92rem/1.45 "Consolas", "Courier New", monospace;
 }
@@ -478,25 +586,27 @@ input::placeholder {
 
 .skin-preview-box {
   background: rgba(255, 255, 255, 0.06);
-  border-radius: 1.25rem;
+  border-radius: var(--radius-lg);
   padding: 1rem;
   min-height: 12rem;
+  border: var(--border-soft);
 }
 
 .skin-preview-box img {
   width: 100%;
   max-width: 16rem;
-  border-radius: 1rem;
-  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.22);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
 }
 
 .skin-actions {
   background: var(--card-soft);
-  border-radius: 1.25rem;
+  border-radius: var(--radius-lg);
   padding: 1rem;
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
+  border: var(--border-soft);
 }
 
 @media (max-width: 1100px) {
@@ -527,6 +637,16 @@ input::placeholder {
 
   .skins-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .app-shell {
+    padding: 1.1rem;
+  }
+
+  .hero {
+    padding: 1.1rem;
   }
 }
 

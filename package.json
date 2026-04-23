@@ -1,13 +1,13 @@
 {
   "name": "zen-client",
-  "version": "1.0.0",
+  "version": "1.0.4",
   "description": "Zen Client Minecraft launcher rebuilt in JavaScript and Electron.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "icons": "node scripts/generate-icons.js",
     "dist": "npm run icons && electron-builder --win nsis",
-    "release": "npm run icons && electron-builder --win nsis --publish always"
+    "release": "npm run icons && electron-builder --win nsis"
   },
   "keywords": [
     "minecraft",
@@ -56,15 +56,15 @@
     ]
   },
   "dependencies": {
-    "electron": "^38.2.0",
     "minecraft-launcher-core": "^3.18.2",
     "msmc": "^5.0.5",
     "discord-rpc": "^4.0.1",
-    "pngjs": "^7.0.0"
+    "pngjs": "^7.0.0",
+    "electron-updater": "^6.6.2"
   },
   "devDependencies": {
+    "electron": "^38.2.0",
     "electron-builder": "^24.13.3",
-    "electron-updater": "^6.6.2",
     "png-to-ico": "^2.1.8"
   }
 }
