@@ -102,15 +102,71 @@ function sendEvent(channel, payload) {
 }
 
 function zenIconDataUrl() {
-  // Simple black/white concentric-circle logo (matches the UI badge).
+  // Ink-brush enso: organic, imperfect circle (less "Target logo").
   const svg = `
   <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-    <rect width="64" height="64" rx="12" fill="#0a0a0a"/>
-    <circle cx="32" cy="32" r="24" fill="none" stroke="#f5f5f5" stroke-width="6"/>
-    <circle cx="32" cy="32" r="13" fill="none" stroke="#f5f5f5" stroke-width="6"/>
-    <circle cx="32" cy="32" r="5" fill="#f5f5f5"/>
+    <defs>
+      <filter id="ink" x="-30%" y="-30%" width="160%" height="160%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" result="noise"/>
+        <feDisplacementMap in="SourceGraphic" in2="noise" scale="1.4" xChannelSelector="R" yChannelSelector="G"/>
+        <feGaussianBlur stdDeviation="0.25"/>
+      </filter>
+      <radialGradient id="paper" cx="40%" cy="30%" r="70%">
+        <stop offset="0%" stop-color="#151515"/>
+        <stop offset="100%" stop-color="#0a0a0a"/>
+      </radialGradient>
+    </defs>
+    <rect width="64" height="64" rx="12" fill="url(#paper)"/>
+    <path
+      d="M 46 17
+         C 38 9, 20 11, 15 23
+         C 10 35, 17 50, 30 52
+         C 42 54, 54 44, 52 31
+         C 50 21, 40 15, 33 16"
+      fill="none"
+      stroke="#f4f4f4"
+      stroke-width="7.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      opacity="0.95"
+      filter="url(#ink)"
+    />
+    <path
+      d="M 47 18
+         C 40 11, 23 12, 17 24
+         C 12 36, 18 49, 30 51
+         C 42 53, 52 45, 51 33"
+      fill="none"
+      stroke="#f4f4f4"
+      stroke-width="3.2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      opacity="0.22"
+      filter="url(#ink)"
+    />
   </svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function formatInvokeError(error) {
+  if (!error) return "Unknown error";
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message || String(error);
+  if (typeof error === "object") {
+    const message =
+      error.message ||
+      error.error_description ||
+      error.error ||
+      error.statusText ||
+      error.name;
+    if (message) return String(message);
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+  return String(error);
 }
 
 function createWindow() {
@@ -997,69 +1053,89 @@ ipcMain.handle("launch:start", async (_event, settings) => {
 });
 
 ipcMain.handle("skin:getProfile", async () => {
-  const state = loadState();
-  const account = state.accounts.find((item) => item.id === state.selectedAccountId);
-  if (!account) throw new Error("Choose an account first.");
-  if (account.type !== "microsoft") throw new Error("Skin changing only works for Microsoft accounts.");
+  try {
+    const state = loadState();
+    const account = state.accounts.find((item) => item.id === state.selectedAccountId);
+    if (!account) throw new Error("Choose an account first.");
+    if (account.type !== "microsoft") throw new Error("Skin changing only works for Microsoft accounts.");
 
-  const accessToken = await resolveMinecraftServicesAccessToken(account);
-  const response = await fetch("https://api.minecraftservices.com/minecraft/profile", {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json"
+    let accessToken = "";
+    try {
+      accessToken = await resolveMinecraftServicesAccessToken(account);
+    } catch (error) {
+      throw new Error(`Could not load skin profile (session expired). Click 'Sign in with Microsoft' again. (${formatInvokeError(error)})`);
     }
-  });
-  if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
-      throw new Error("Could not load skin profile (session expired). Click 'Sign in with Microsoft' again.");
+
+    const response = await fetch("https://api.minecraftservices.com/minecraft/profile", {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json"
+      }
+    });
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new Error("Could not load skin profile (session expired). Click 'Sign in with Microsoft' again.");
+      }
+      const text = await response.text().catch(() => "");
+      throw new Error(`Could not load skin profile (${response.status}). ${text}`.trim());
     }
-    throw new Error(`Could not load skin profile: ${response.status}`);
+    return response.json();
+  } catch (error) {
+    throw new Error(formatInvokeError(error));
   }
-  return response.json();
 });
 
 ipcMain.handle("skin:upload", async (_event, payload) => {
-  const state = loadState();
-  const account = state.accounts.find((item) => item.id === state.selectedAccountId);
-  if (!account) throw new Error("Choose an account first.");
-  if (account.type !== "microsoft") throw new Error("Skin changing only works for Microsoft accounts.");
+  try {
+    const state = loadState();
+    const account = state.accounts.find((item) => item.id === state.selectedAccountId);
+    if (!account) throw new Error("Choose an account first.");
+    if (account.type !== "microsoft") throw new Error("Skin changing only works for Microsoft accounts.");
 
-  const variant = payload?.variant === "slim" ? "slim" : "classic";
-  const bytes = payload?.bytes;
-  if (!bytes || !Array.isArray(bytes) || bytes.length < 24) throw new Error("Invalid skin file.");
-  if (bytes.length > 3_000_000) throw new Error("Skin file is too large.");
+    const variant = payload?.variant === "slim" ? "slim" : "classic";
+    const bytes = payload?.bytes;
+    if (!bytes || !Array.isArray(bytes) || bytes.length < 24) throw new Error("Invalid skin file.");
+    if (bytes.length > 3_000_000) throw new Error("Skin file is too large.");
 
-  const fileBytes = Buffer.from(bytes);
-  const header = fileBytes.subarray(0, 8);
-  const pngMagic = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  if (!header.equals(pngMagic)) throw new Error("Skin must be a PNG file.");
+    const fileBytes = Buffer.from(bytes);
+    const header = fileBytes.subarray(0, 8);
+    const pngMagic = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    if (!header.equals(pngMagic)) throw new Error("Skin must be a PNG file.");
 
-  const accessToken = await resolveMinecraftServicesAccessToken(account);
-
-  const { body, contentType } = buildMultipartBody(
-    { variant },
-    {
-      name: "file",
-      filename: "skin.png",
-      contentType: "image/png",
-      bytes: fileBytes
+    let accessToken = "";
+    try {
+      accessToken = await resolveMinecraftServicesAccessToken(account);
+    } catch (error) {
+      throw new Error(`Skin upload failed (session expired). Click 'Sign in with Microsoft' again. (${formatInvokeError(error)})`);
     }
-  );
 
-  const response = await fetch("https://api.minecraftservices.com/minecraft/profile/skins", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": contentType
-    },
-    body
-  });
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Skin upload failed (${response.status}). ${text}`.trim());
+    const { body, contentType } = buildMultipartBody(
+      { variant },
+      {
+        name: "file",
+        filename: "skin.png",
+        contentType: "image/png",
+        bytes: fileBytes
+      }
+    );
+
+    const response = await fetch("https://api.minecraftservices.com/minecraft/profile/skins", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": contentType
+      },
+      body
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(`Skin upload failed (${response.status}). ${text}`.trim());
+    }
+    appendLog(`[skin] Uploaded ${variant} skin for ${account.username}`);
+    return true;
+  } catch (error) {
+    throw new Error(formatInvokeError(error));
   }
-  appendLog(`[skin] Uploaded ${variant} skin for ${account.username}`);
-  return true;
 });
 
 ipcMain.handle("resourcepack:installAeroMenu", async (_event, payload) => {
