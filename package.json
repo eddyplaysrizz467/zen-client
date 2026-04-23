@@ -1,6 +1,6 @@
 {
   "name": "zen-client",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "description": "Zen Client Minecraft launcher rebuilt in JavaScript and Electron.",
   "main": "main.js",
   "scripts": {
@@ -45,11 +45,15 @@
       "icon": "build/icon.ico"
     },
     "nsis": {
+      "artifactName": "Zen-Client-Setup-${version}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Zen Client"
+    },
+    "portable": {
+      "artifactName": "Zen-Client-${version}.${ext}"
     }
   },
   "dependencies": {
