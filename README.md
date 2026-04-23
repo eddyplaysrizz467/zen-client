@@ -2,6 +2,19 @@
 
 Zen Client is a JavaScript + Electron Minecraft launcher.
 
+## Download (Windows)
+
+Get the latest `.exe` here:
+
+- https://github.com/eddyplaysrizz467/zen-client/releases/latest
+
+On the release page, download either:
+
+- `Zen Client <version>.exe` (portable single EXE), or
+- `Zen Client Setup <version>.exe` (installer)
+
+Tip: do not use "Code -> Download ZIP" unless you're developing. That's the source code.
+
 ## What it has
 
 - Vanilla, Fabric, and Quilt launch types
@@ -15,15 +28,19 @@ Zen Client is a JavaScript + Electron Minecraft launcher.
 
 ## How to open it
 
-Open it from this folder:
+### For normal use (recommended)
 
-`C:\Users\Admin\Documents\Codex\2026-04-20-hi-chat-gpt-can-you-please`
+Download and run the Windows installer from GitHub Releases:
 
-The easiest way is:
+- Go to this repo's Releases page
+- Download `Zen Client Setup <version>.exe`
+- Run the installer, then open Zen Client from the Start Menu or Desktop shortcut
 
-- double-click `Zen Client.bat`
+Note: the installer includes the app. Minecraft game files (and loader files like Fabric/Quilt) are downloaded when you launch/install them inside the app.
 
-You can also run it in PowerShell:
+### For development
+
+From the repo folder, you can run it with:
 
 ```powershell
 npm start

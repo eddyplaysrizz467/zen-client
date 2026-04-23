@@ -37,6 +37,8 @@ async function main() {
   const png = new PNG({ width: size, height: size });
 
   // Background: near-black.
+  const cx = size / 2;
+  const cy = size / 2;
   for (let i = 0; i < png.data.length; i += 4) {
     png.data[i] = 10;
     png.data[i + 1] = 10;
@@ -45,8 +47,6 @@ async function main() {
   }
 
   const white = [245, 245, 245, 255];
-  const cx = size / 2;
-  const cy = size / 2;
 
   // Two rings + center dot.
   drawCircle(png, cx, cy, 96, 18, white);

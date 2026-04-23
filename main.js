@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, nativeImage, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, nativeImage, Menu, shell, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -23,6 +23,7 @@ let discordReady = false;
 let discordConnecting = false;
 let currentSession = null;
 let logBuffer = [];
+let updatePollTimer = null;
 
 function ensureDir(target) {
   fs.mkdirSync(target, { recursive: true });
@@ -102,7 +103,7 @@ function sendEvent(channel, payload) {
 }
 
 function zenIconDataUrl() {
-  // Simple black/white concentric-circle logo (matches the UI badge).
+  // Simple black/white concentric-circle logo (matches the launcher UI badge).
   const svg = `
   <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
     <rect width="64" height="64" rx="12" fill="#0a0a0a"/>
@@ -111,6 +112,27 @@ function zenIconDataUrl() {
     <circle cx="32" cy="32" r="5" fill="#f5f5f5"/>
   </svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function formatInvokeError(error) {
+  if (!error) return "Unknown error";
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message || String(error);
+  if (typeof error === "object") {
+    const message =
+      error.message ||
+      error.error_description ||
+      error.error ||
+      error.statusText ||
+      error.name;
+    if (message) return String(message);
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+  return String(error);
 }
 
 function createWindow() {
@@ -168,32 +190,92 @@ function initAutoUpdater() {
     return;
   }
 
-  autoUpdater.autoDownload = true;
+  autoUpdater.autoDownload = false;
   autoUpdater.logger = null;
 
+  let updatePromptOpen = false;
+  let updateDownloadStarted = false;
+  let updateReadyPromptShown = false;
+
+  async function promptToDownloadUpdate(version) {
+    if (updatePromptOpen || updateDownloadStarted) return;
+    updatePromptOpen = true;
+    try {
+      const result = await dialog.showMessageBox(mainWindow, {
+        type: "info",
+        buttons: ["Yes"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+        title: "Update available",
+        message: `Zen Client ${version || "update"} is available.`,
+        detail: "Would you like to update now?"
+      });
+      if (result.response === 0) {
+        updateDownloadStarted = true;
+        appendLog("[update] Starting update download...");
+        await autoUpdater.downloadUpdate();
+      }
+    } catch (error) {
+      appendLog(`[update] Could not start update: ${error?.message || String(error)}`);
+      updateDownloadStarted = false;
+    } finally {
+      updatePromptOpen = false;
+    }
+  }
+
+  async function promptToInstallUpdate(version) {
+    if (updateReadyPromptShown) return;
+    updateReadyPromptShown = true;
+    try {
+      const result = await dialog.showMessageBox(mainWindow, {
+        type: "info",
+        buttons: ["Yes"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+        title: "Update ready",
+        message: `Zen Client ${version || "update"} is ready to install.`,
+        detail: "Would you like to update now?"
+      });
+      if (result.response === 0) {
+        appendLog("[update] Installing update now...");
+        autoUpdater.quitAndInstall();
+      }
+    } catch (error) {
+      appendLog(`[update] Could not install update: ${error?.message || String(error)}`);
+      updateReadyPromptShown = false;
+    }
+  }
+
   autoUpdater.on("checking-for-update", () => appendLog("[update] Checking for updates..."));
-  autoUpdater.on("update-available", (info) => appendLog(`[update] Update available: ${info?.version || "new version"}`));
+  autoUpdater.on("update-available", (info) => {
+    appendLog(`[update] Update available: ${info?.version || "new version"}`);
+    promptToDownloadUpdate(info?.version).catch(() => {});
+  });
   autoUpdater.on("update-not-available", () => appendLog("[update] No updates available."));
-  autoUpdater.on("error", (err) => appendLog(`[update] Error: ${err?.message || String(err)}`));
+  autoUpdater.on("error", (err) => {
+    appendLog(`[update] Error: ${err?.message || String(err)}`);
+    updateDownloadStarted = false;
+  });
   autoUpdater.on("download-progress", (p) => {
     const pct = typeof p?.percent === "number" ? p.percent.toFixed(0) : "?";
     appendLog(`[update] Downloading... ${pct}%`);
   });
-  autoUpdater.on("update-downloaded", () => {
-    appendLog("[update] Update downloaded. Restarting to install...");
-    setTimeout(() => {
-      try {
-        autoUpdater.quitAndInstall();
-      } catch {
-        // ignore
-      }
-    }, 1200);
+  autoUpdater.on("update-downloaded", (info) => {
+    appendLog("[update] Update downloaded.");
+    promptToInstallUpdate(info?.version).catch(() => {});
   });
 
   // Kick off once shortly after the window exists.
   setTimeout(() => {
     autoUpdater.checkForUpdates().catch(() => {});
   }, 2500);
+
+  if (updatePollTimer) clearInterval(updatePollTimer);
+  updatePollTimer = setInterval(() => {
+    autoUpdater.checkForUpdates().catch(() => {});
+  }, 10_000);
 }
 
 function sanitizeAccount(account) {
@@ -213,10 +295,14 @@ function getDiscordActivity(state) {
   const base = { startTimestamp: Math.floor(now / 1000) };
 
   if (currentSession && settings.discordShowPlaying) {
+    const details = `Zen Client - ${currentSession.launchType || "Vanilla"}`;
+    let stateLine = `Playing ${currentSession.version || ""}`.trim();
+    if (currentSession.phase === "loading_peace") stateLine = "Loading peace...";
+    if (currentSession.phase === "have_fun") stateLine = "Have fun!";
     return {
       ...base,
-      details: `Playing ${currentSession.launchType} ${currentSession.version}`,
-      state: currentSession.username ? `Account: ${currentSession.username}` : "In game",
+      details,
+      state: stateLine || "In game",
       instance: false
     };
   }
@@ -232,6 +318,18 @@ function getDiscordActivity(state) {
   }
 
   return null;
+}
+
+function updateSessionPhaseFromLog(line) {
+  if (!currentSession) return;
+  const text = String(line || "").toLowerCase();
+  let next = null;
+  if (text.includes("joining server") || text.includes("connecting to")) next = "loading_peace";
+  if (text.includes("loading terrain")) next = "have_fun";
+  if (next && currentSession.phase !== next) {
+    currentSession.phase = next;
+    setDiscordPresence();
+  }
 }
 
 async function setDiscordPresence() {
@@ -751,7 +849,11 @@ async function launchGame(settings) {
 
   launchClient = new Client();
   launchClient.on("debug", (data) => appendLog(String(data)));
-  launchClient.on("data", (data) => appendLog(String(data).trim()));
+  launchClient.on("data", (data) => {
+    const line = String(data || "").trim();
+    if (line) updateSessionPhaseFromLog(line);
+    appendLog(line);
+  });
   launchClient.on("download", (data) => appendLog(`[download] ${data}`));
   launchClient.on("progress", (data) => {
     if (data?.task && typeof data.total === "number" && typeof data.current === "number") {
@@ -796,7 +898,8 @@ async function launchGame(settings) {
   currentSession = {
     launchType: selectedType,
     version: selectedVersion,
-    username: account.username
+    username: account.username,
+    phase: null
   };
   setDiscordPresence();
 
@@ -996,70 +1099,172 @@ ipcMain.handle("launch:start", async (_event, settings) => {
   return true;
 });
 
-ipcMain.handle("skin:getProfile", async () => {
-  const state = loadState();
-  const account = state.accounts.find((item) => item.id === state.selectedAccountId);
-  if (!account) throw new Error("Choose an account first.");
-  if (account.type !== "microsoft") throw new Error("Skin changing only works for Microsoft accounts.");
-
-  const accessToken = await resolveMinecraftServicesAccessToken(account);
-  const response = await fetch("https://api.minecraftservices.com/minecraft/profile", {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json"
-    }
-  });
-  if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
-      throw new Error("Could not load skin profile (session expired). Click 'Sign in with Microsoft' again.");
-    }
-    throw new Error(`Could not load skin profile: ${response.status}`);
-  }
-  return response.json();
+ipcMain.handle("shell:openExternal", async (_event, url) => {
+  const target = String(url || "").trim();
+  if (!target) throw new Error("Missing URL.");
+  await shell.openExternal(target);
+  return true;
 });
 
-ipcMain.handle("skin:upload", async (_event, payload) => {
-  const state = loadState();
-  const account = state.accounts.find((item) => item.id === state.selectedAccountId);
-  if (!account) throw new Error("Choose an account first.");
-  if (account.type !== "microsoft") throw new Error("Skin changing only works for Microsoft accounts.");
-
-  const variant = payload?.variant === "slim" ? "slim" : "classic";
-  const bytes = payload?.bytes;
-  if (!bytes || !Array.isArray(bytes) || bytes.length < 24) throw new Error("Invalid skin file.");
-  if (bytes.length > 3_000_000) throw new Error("Skin file is too large.");
-
-  const fileBytes = Buffer.from(bytes);
-  const header = fileBytes.subarray(0, 8);
-  const pngMagic = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  if (!header.equals(pngMagic)) throw new Error("Skin must be a PNG file.");
-
-  const accessToken = await resolveMinecraftServicesAccessToken(account);
-
-  const { body, contentType } = buildMultipartBody(
-    { variant },
-    {
-      name: "file",
-      filename: "skin.png",
-      contentType: "image/png",
-      bytes: fileBytes
-    }
-  );
-
-  const response = await fetch("https://api.minecraftservices.com/minecraft/profile/skins", {
-    method: "POST",
+async function modrinthFetchJson(url) {
+  const response = await fetch(url, {
     headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": contentType
-    },
-    body
+      "User-Agent": "Zen Client"
+    }
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(`Skin upload failed (${response.status}). ${text}`.trim());
+    throw new Error(`Modrinth request failed (${response.status}). ${text}`.trim());
   }
-  appendLog(`[skin] Uploaded ${variant} skin for ${account.username}`);
-  return true;
+  return response.json();
+}
+
+function normalizeLoaderForModrinth(launchType) {
+  const normalized = String(launchType || "").toLowerCase();
+  if (normalized === "fabric") return "fabric";
+  if (normalized === "quilt") return "quilt";
+  return "";
+}
+
+ipcMain.handle("modrinth:install", async (_event, payload) => {
+  const projectId = String(payload?.projectId || "").trim();
+  const projectType = String(payload?.projectType || "").trim();
+  const minecraftRoot = String(payload?.minecraftDirectory || DEFAULT_ROOT).trim() || DEFAULT_ROOT;
+  const minecraftVersion = String(payload?.minecraftVersion || "").trim();
+  const launchType = String(payload?.launchType || "").trim();
+
+  if (!projectId) throw new Error("Missing Modrinth project id.");
+  if (projectType !== "mod" && projectType !== "resourcepack") throw new Error("Unsupported project type.");
+  if (!minecraftVersion) throw new Error("Pick a Minecraft version first.");
+
+  const loader = normalizeLoaderForModrinth(launchType);
+  if (projectType === "mod" && !loader) {
+    throw new Error("Switch Launch type to Fabric or Quilt to install mods.");
+  }
+
+  const versionsUrl = new URL(`https://api.modrinth.com/v2/project/${encodeURIComponent(projectId)}/version`);
+  versionsUrl.searchParams.set("game_versions", JSON.stringify([minecraftVersion]));
+  if (projectType === "mod") {
+    versionsUrl.searchParams.set("loaders", JSON.stringify([loader]));
+  }
+
+  let versions = await modrinthFetchJson(versionsUrl.toString());
+  if (!Array.isArray(versions) || versions.length === 0) {
+    // Fallback: try without loader/game filters (still picks latest).
+    const fallbackUrl = `https://api.modrinth.com/v2/project/${encodeURIComponent(projectId)}/version`;
+    versions = await modrinthFetchJson(fallbackUrl);
+  }
+
+  if (!Array.isArray(versions) || versions.length === 0) {
+    throw new Error("No compatible versions found on Modrinth for your selected settings.");
+  }
+
+  const chosen = versions[0];
+  const files = Array.isArray(chosen?.files) ? chosen.files : [];
+  const file = files.find((f) => f?.primary) || files[0];
+  const fileUrl = String(file?.url || "").trim();
+  const fileName = path.basename(String(file?.filename || "").trim() || "download.bin");
+  if (!fileUrl) throw new Error("No downloadable file returned by Modrinth.");
+
+  const targetDir = projectType === "mod" ? path.join(minecraftRoot, "mods") : path.join(minecraftRoot, "resourcepacks");
+  ensureDir(targetDir);
+  const outPath = path.join(targetDir, fileName);
+
+  appendLog(`[modrinth] Downloading ${projectType} ${projectId} -> ${outPath}`);
+  const response = await fetch(fileUrl);
+  if (!response.ok) {
+    throw new Error(`Download failed (${response.status}).`);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  fs.writeFileSync(outPath, buffer);
+  appendLog(`[modrinth] Installed ${fileName}`);
+  return { path: outPath, fileName };
+});
+
+ipcMain.handle("skin:getProfile", async () => {
+  try {
+    const state = loadState();
+    const account = state.accounts.find((item) => item.id === state.selectedAccountId);
+    if (!account) throw new Error("Choose an account first.");
+    if (account.type !== "microsoft") throw new Error("Skin changing only works for Microsoft accounts.");
+
+    let accessToken = "";
+    try {
+      accessToken = await resolveMinecraftServicesAccessToken(account);
+    } catch (error) {
+      throw new Error(`Could not load skin profile (session expired). Click 'Sign in with Microsoft' again. (${formatInvokeError(error)})`);
+    }
+
+    const response = await fetch("https://api.minecraftservices.com/minecraft/profile", {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json"
+      }
+    });
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new Error("Could not load skin profile (session expired). Click 'Sign in with Microsoft' again.");
+      }
+      const text = await response.text().catch(() => "");
+      throw new Error(`Could not load skin profile (${response.status}). ${text}`.trim());
+    }
+    return response.json();
+  } catch (error) {
+    throw new Error(formatInvokeError(error));
+  }
+});
+
+ipcMain.handle("skin:upload", async (_event, payload) => {
+  try {
+    const state = loadState();
+    const account = state.accounts.find((item) => item.id === state.selectedAccountId);
+    if (!account) throw new Error("Choose an account first.");
+    if (account.type !== "microsoft") throw new Error("Skin changing only works for Microsoft accounts.");
+
+    const variant = payload?.variant === "slim" ? "slim" : "classic";
+    const bytes = payload?.bytes;
+    if (!bytes || !Array.isArray(bytes) || bytes.length < 24) throw new Error("Invalid skin file.");
+    if (bytes.length > 3_000_000) throw new Error("Skin file is too large.");
+
+    const fileBytes = Buffer.from(bytes);
+    const header = fileBytes.subarray(0, 8);
+    const pngMagic = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    if (!header.equals(pngMagic)) throw new Error("Skin must be a PNG file.");
+
+    let accessToken = "";
+    try {
+      accessToken = await resolveMinecraftServicesAccessToken(account);
+    } catch (error) {
+      throw new Error(`Skin upload failed (session expired). Click 'Sign in with Microsoft' again. (${formatInvokeError(error)})`);
+    }
+
+    const { body, contentType } = buildMultipartBody(
+      { variant },
+      {
+        name: "file",
+        filename: "skin.png",
+        contentType: "image/png",
+        bytes: fileBytes
+      }
+    );
+
+    const response = await fetch("https://api.minecraftservices.com/minecraft/profile/skins", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": contentType
+      },
+      body
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(`Skin upload failed (${response.status}). ${text}`.trim());
+    }
+    appendLog(`[skin] Uploaded ${variant} skin for ${account.username}`);
+    return true;
+  } catch (error) {
+    throw new Error(formatInvokeError(error));
+  }
 });
 
 ipcMain.handle("resourcepack:installAeroMenu", async (_event, payload) => {

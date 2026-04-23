@@ -6,9 +6,11 @@ const logBox = document.getElementById("logBox");
 
 const tabLauncher = document.getElementById("tabLauncher");
 const tabSettings = document.getElementById("tabSettings");
+const tabLibrary = document.getElementById("tabLibrary");
 const tabSkins = document.getElementById("tabSkins");
 const panelLauncher = document.getElementById("panelLauncher");
 const panelSettings = document.getElementById("panelSettings");
+const panelLibrary = document.getElementById("panelLibrary");
 const panelSkins = document.getElementById("panelSkins");
 
 const launchType = document.getElementById("launchType");
@@ -25,10 +27,14 @@ const discordShowPlaying = document.getElementById("discordShowPlaying");
 const installMenuPackButton = document.getElementById("installMenuPackButton");
 
 const skinPreviewBox = document.getElementById("skinPreviewBox");
-const skinFile = document.getElementById("skinFile");
-const uploadClassicSkin = document.getElementById("uploadClassicSkin");
-const uploadSlimSkin = document.getElementById("uploadSlimSkin");
 const refreshSkinButton = document.getElementById("refreshSkinButton");
+
+const refreshModsButton = document.getElementById("refreshModsButton");
+const refreshPacksButton = document.getElementById("refreshPacksButton");
+const modsSearch = document.getElementById("modsSearch");
+const packsSearch = document.getElementById("packsSearch");
+const modsList = document.getElementById("modsList");
+const packsList = document.getElementById("packsList");
 
 const microsoftButton = document.getElementById("microsoftButton");
 const removeAccountButton = document.getElementById("removeAccountButton");
@@ -43,6 +49,9 @@ let state = null;
 let versions = { vanilla: [], fabric: [], quilt: [] };
 let busy = false;
 // Panda + bubble visuals were removed per request.
+let libraryBusy = false;
+let modrinthMods = [];
+let modrinthPacks = [];
 
 function setBusy(nextBusy) {
   busy = nextBusy;
@@ -53,8 +62,6 @@ function setBusy(nextBusy) {
     refreshVersionsButton,
     launchButton,
     installMenuPackButton,
-    uploadClassicSkin,
-    uploadSlimSkin,
     refreshSkinButton
   ].forEach((button) => {
     button.disabled = nextBusy;
@@ -146,6 +153,38 @@ function renderHero() {
   }
 }
 
+function skinHeadUrl(account) {
+  const username = String(account?.username || "").trim();
+  const rawUuid = String(account?.uuid || "").trim();
+  const cleanUuid = rawUuid.replace(/-/g, "");
+
+  if (cleanUuid) {
+    return `https://crafatar.com/avatars/${encodeURIComponent(cleanUuid)}?size=128&overlay`;
+  }
+
+  if (username) {
+    return `https://minotar.net/helm/${encodeURIComponent(username)}/128.png`;
+  }
+
+  return "";
+}
+
+function renderSkinHead() {
+  const selected = getSelectedAccount();
+  if (!selected) {
+    skinPreviewBox.innerHTML = `<div class="empty-state">Select an account to load skin info.</div>`;
+    return;
+  }
+
+  const url = skinHeadUrl(selected);
+  if (!url) {
+    skinPreviewBox.innerHTML = `<div class="empty-state">No skin info available for this account.</div>`;
+    return;
+  }
+
+  skinPreviewBox.innerHTML = `<img alt="Minecraft skin head preview" referrerpolicy="no-referrer" src="${url}" />`;
+}
+
 function normalizeBackgroundPreset(presetValue) {
   const normalized = String(presetValue || "").toLowerCase();
   if (normalized === "ink") return "ink";
@@ -162,6 +201,13 @@ function applyBackgroundPreset(presetValue) {
 function appendLog(message) {
   logBox.textContent = `${logBox.textContent}${message}\n`;
   logBox.scrollTop = logBox.scrollHeight;
+
+  const line = String(message || "").toLowerCase();
+  if (line.includes("joining server") || line.includes("connecting to")) {
+    statusText.textContent = "Loading peace...";
+  } else if (line.includes("loading terrain")) {
+    statusText.textContent = "Have fun!";
+  }
 }
 
 // (Bubble popping removed.)
@@ -214,6 +260,7 @@ function setActiveTab(tabName) {
   const tabs = [
     { name: "launcher", button: tabLauncher, panel: panelLauncher },
     { name: "settings", button: tabSettings, panel: panelSettings },
+    { name: "library", button: tabLibrary, panel: panelLibrary },
     { name: "skins", button: tabSkins, panel: panelSkins }
   ];
   tabs.forEach(({ name, button, panel }) => {
@@ -222,13 +269,13 @@ function setActiveTab(tabName) {
     panel.classList.toggle("active", active);
   });
   localStorage.setItem("aeroTab", tabName);
-  if (tabName === "skins") {
-    refreshSkinProfile().catch(() => {});
-  }
+  if (tabName === "skins") renderSkinHead();
+  if (tabName === "library") ensureLibraryLoaded().catch(() => {});
 }
 
 tabLauncher.addEventListener("click", () => setActiveTab("launcher"));
 tabSettings.addEventListener("click", () => setActiveTab("settings"));
+tabLibrary.addEventListener("click", () => setActiveTab("library"));
 tabSkins.addEventListener("click", () => setActiveTab("skins"));
 
 launchType.addEventListener("change", async () => {
@@ -249,9 +296,7 @@ microsoftButton.addEventListener("click", async () => {
     const result = await window.aeroApi.microsoftLogin();
     syncFromState(result.state);
     statusText.textContent = `Microsoft account saved: ${result.account.username}`;
-    if (localStorage.getItem("aeroTab") === "skins") {
-      await refreshSkinProfile();
-    }
+    if (localStorage.getItem("aeroTab") === "skins") renderSkinHead();
   } catch (error) {
     statusText.textContent = `Problem: ${error.message}`;
   } finally {
@@ -308,71 +353,151 @@ installMenuPackButton.addEventListener("click", async () => {
   }
 });
 
-async function refreshSkinProfile() {
-  const selected = getSelectedAccount();
-  if (!selected || selected.type !== "microsoft") {
-    skinPreviewBox.innerHTML = `<div class="empty-state">Select a Microsoft account to load skin info.</div>`;
-    uploadClassicSkin.disabled = true;
-    uploadSlimSkin.disabled = true;
-    refreshSkinButton.disabled = true;
-    return;
-  }
-  uploadClassicSkin.disabled = busy;
-  uploadSlimSkin.disabled = busy;
-  refreshSkinButton.disabled = busy;
-  skinPreviewBox.innerHTML = `<div class="empty-state">Loading skin profile...</div>`;
-  try {
-    const profile = await window.aeroApi.getSkinProfile();
-    const skins = Array.isArray(profile?.skins) ? profile.skins : [];
-    const current = skins.find((skin) => skin.state === "ACTIVE") || skins[0];
-    if (!current?.url) {
-      skinPreviewBox.innerHTML = `<div class="empty-state">No skin URL returned by Minecraft services.</div>`;
-      return;
+refreshSkinButton.addEventListener("click", () => renderSkinHead());
+
+function formatDownloads(value) {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num) || num <= 0) return "";
+  if (num >= 1_000_000_000) return `${(num / 1_000_000_000).toFixed(1)}b`;
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}m`;
+  if (num >= 1_000) return `${(num / 1_000).toFixed(1)}k`;
+  return String(num);
+}
+
+function libraryItemCard(item, projectType) {
+  const row = document.createElement("div");
+  row.className = "library-item";
+
+  const title = document.createElement("div");
+  title.className = "library-item-title";
+  title.textContent = item.title || item.slug || "Unknown";
+
+  const meta = document.createElement("div");
+  meta.className = "library-item-meta";
+  const downloads = formatDownloads(item.downloads);
+  meta.textContent = downloads ? `${downloads} downloads` : "";
+
+  const desc = document.createElement("div");
+  desc.className = "library-item-desc";
+  desc.textContent = item.description || "";
+
+  const actions = document.createElement("div");
+  actions.className = "library-item-actions";
+
+  const openBtn = document.createElement("button");
+  openBtn.className = "ghost";
+  openBtn.type = "button";
+  openBtn.textContent = "Open";
+  openBtn.addEventListener("click", () => {
+    const url = `https://modrinth.com/${projectType}/${item.slug}`;
+    window.aeroApi.openExternal(url).catch(() => {});
+  });
+
+  const installBtn = document.createElement("button");
+  installBtn.className = "primary";
+  installBtn.type = "button";
+  installBtn.textContent = "Install";
+  installBtn.addEventListener("click", async () => {
+    const settings = collectSettings();
+    setBusy(true);
+    statusText.textContent = `Installing ${item.title || item.slug}...`;
+    try {
+      await window.aeroApi.installModrinth({
+        projectId: item.project_id,
+        projectType,
+        minecraftDirectory: settings.minecraftDirectory,
+        minecraftVersion: settings.minecraftVersion,
+        launchType: settings.launchType
+      });
+      statusText.textContent = `Installed ${item.title || item.slug}.`;
+    } catch (error) {
+      statusText.textContent = `Problem: ${error.message}`;
+    } finally {
+      setBusy(false);
     }
-    // Minecraft sometimes returns `http://textures.minecraft.net/...`. Use https to avoid mixed-content/security issues.
-    const safeUrl = String(current.url).replace(/^http:\/\//i, "https://");
-    skinPreviewBox.innerHTML = `<img alt="Minecraft skin preview" referrerpolicy="no-referrer" src="${safeUrl}" />`;
-  } catch (error) {
-    skinPreviewBox.innerHTML = `<div class="empty-state">Problem loading skin: ${error.message}</div>`;
-  }
+  });
+
+  actions.appendChild(openBtn);
+  actions.appendChild(installBtn);
+
+  row.appendChild(title);
+  if (meta.textContent) row.appendChild(meta);
+  if (desc.textContent) row.appendChild(desc);
+  row.appendChild(actions);
+  return row;
 }
 
-async function uploadSkin(variant) {
-  const selected = getSelectedAccount();
-  if (!selected || selected.type !== "microsoft") {
-    statusText.textContent = "Select a Microsoft account to upload a skin.";
+function renderLibraryList(target, items, query, projectType) {
+  const q = String(query || "").trim().toLowerCase();
+  const filtered = q
+    ? items.filter((item) => {
+        const hay = `${item.title || ""} ${item.slug || ""} ${item.description || ""}`.toLowerCase();
+        return hay.includes(q);
+      })
+    : items;
+
+  target.innerHTML = "";
+  if (!filtered.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = q ? "No matches." : "Nothing loaded yet.";
+    target.appendChild(empty);
     return;
   }
-  if (!skinFile.files || !skinFile.files.length) {
-    statusText.textContent = "Choose a skin PNG file first.";
-    return;
+
+  filtered.forEach((item) => target.appendChild(libraryItemCard(item, projectType)));
+}
+
+async function modrinthSearch({ projectType, category, limit }) {
+  const url = new URL("https://api.modrinth.com/v2/search");
+  url.searchParams.set("index", "downloads");
+  url.searchParams.set("limit", String(limit || 100));
+  url.searchParams.set("query", "");
+  url.searchParams.set("facets", JSON.stringify([[`project_type:${projectType}`], [`categories:${category}`]]));
+
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    throw new Error(`Modrinth request failed: ${response.status}`);
   }
-  const file = skinFile.files[0];
-  const buf = await file.arrayBuffer();
-  const bytes = Array.from(new Uint8Array(buf));
-  setBusy(true);
-  uploadClassicSkin.disabled = true;
-  uploadSlimSkin.disabled = true;
-  refreshSkinButton.disabled = true;
-  statusText.textContent = "Uploading skin...";
+  const json = await response.json();
+  return Array.isArray(json?.hits) ? json.hits : [];
+}
+
+async function ensureLibraryLoaded() {
+  if (libraryBusy) return;
+  libraryBusy = true;
   try {
-    await window.aeroApi.uploadSkin({ variant, bytes });
-    statusText.textContent = "Skin uploaded. Refreshing preview...";
-    await refreshSkinProfile();
-    statusText.textContent = "Skin updated.";
+    modsList.innerHTML = `<div class="empty-state">Loading mods...</div>`;
+    packsList.innerHTML = `<div class="empty-state">Loading resource packs...</div>`;
+
+    const [mods, packs] = await Promise.all([
+      modrinthSearch({ projectType: "mod", category: "optimization", limit: 100 }),
+      modrinthSearch({ projectType: "resourcepack", category: "pvp", limit: 100 })
+    ]);
+    modrinthMods = mods;
+    modrinthPacks = packs;
+    renderLibraryList(modsList, modrinthMods, modsSearch.value, "mod");
+    renderLibraryList(packsList, modrinthPacks, packsSearch.value, "resourcepack");
   } catch (error) {
-    statusText.textContent = `Problem: ${error.message}`;
+    modsList.innerHTML = `<div class="empty-state">Problem loading mods: ${error.message}</div>`;
+    packsList.innerHTML = `<div class="empty-state">Problem loading packs: ${error.message}</div>`;
   } finally {
-    setBusy(false);
-    uploadClassicSkin.disabled = !isMicrosoftSelected();
-    uploadSlimSkin.disabled = !isMicrosoftSelected();
-    refreshSkinButton.disabled = !isMicrosoftSelected();
+    libraryBusy = false;
   }
 }
 
-uploadClassicSkin.addEventListener("click", () => uploadSkin("classic"));
-uploadSlimSkin.addEventListener("click", () => uploadSkin("slim"));
-refreshSkinButton.addEventListener("click", () => refreshSkinProfile());
+refreshModsButton.addEventListener("click", () => {
+  modrinthMods = [];
+  ensureLibraryLoaded().catch(() => {});
+});
+
+refreshPacksButton.addEventListener("click", () => {
+  modrinthPacks = [];
+  ensureLibraryLoaded().catch(() => {});
+});
+
+modsSearch.addEventListener("input", () => renderLibraryList(modsList, modrinthMods, modsSearch.value, "mod"));
+packsSearch.addEventListener("input", () => renderLibraryList(packsList, modrinthPacks, packsSearch.value, "resourcepack"));
 
 launchButton.addEventListener("click", async () => {
   setBusy(true);
@@ -396,9 +521,8 @@ window.aeroApi.onLog(({ message }) => {
 window.aeroApi.onStateUpdated((nextState) => {
   syncFromState(nextState);
   const stored = localStorage.getItem("aeroTab");
-  if (stored === "skins") {
-    refreshSkinProfile().catch(() => {});
-  }
+  if (stored === "skins") renderSkinHead();
+  if (stored === "library") ensureLibraryLoaded().catch(() => {});
 });
 
 window.aeroApi.onProgress((payload) => {
@@ -417,9 +541,7 @@ async function boot() {
   syncFromState(state);
   setActiveTab(localStorage.getItem("aeroTab") || "launcher");
   await refreshVersions();
-  uploadClassicSkin.disabled = !isMicrosoftSelected();
-  uploadSlimSkin.disabled = !isMicrosoftSelected();
-  refreshSkinButton.disabled = !isMicrosoftSelected();
+  if (localStorage.getItem("aeroTab") === "skins") renderSkinHead();
 }
 
 boot().catch((error) => {

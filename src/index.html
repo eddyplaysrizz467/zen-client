@@ -27,6 +27,7 @@
       <nav class="tabs">
         <button id="tabLauncher" class="tab-button active" type="button">Launcher</button>
         <button id="tabSettings" class="tab-button" type="button">Settings</button>
+        <button id="tabLibrary" class="tab-button" type="button">Mods & Packs</button>
         <button id="tabSkins" class="tab-button" type="button">Skins</button>
       </nav>
 
@@ -162,32 +163,67 @@
         </div>
       </section>
 
+      <section id="panelLibrary" class="tab-panel" aria-label="Mods and packs panel">
+        <div class="card library-card">
+          <div class="card-head">
+            <h2>Mods & Packs</h2>
+            <p>Browse popular performance mods and PVP resource packs, then install them into your selected Minecraft folder.</p>
+          </div>
+
+          <div class="library-grid">
+            <div class="library-column">
+              <div class="library-title-row">
+                <div class="library-title">Performance mods</div>
+                <button id="refreshModsButton" class="ghost" type="button">Refresh</button>
+              </div>
+              <label class="library-search">
+                Search
+                <input id="modsSearch" type="text" placeholder="Type to filter (client, fps, shader...)" />
+              </label>
+              <div id="modsList" class="library-list">
+                <div class="empty-state">Loading mods...</div>
+              </div>
+            </div>
+
+            <div class="library-column">
+              <div class="library-title-row">
+                <div class="library-title">PVP resource packs</div>
+                <button id="refreshPacksButton" class="ghost" type="button">Refresh</button>
+              </div>
+              <label class="library-search">
+                Search
+                <input id="packsSearch" type="text" placeholder="Type to filter (sword, low fire, short...)" />
+              </label>
+              <div id="packsList" class="library-list">
+                <div class="empty-state">Loading resource packs...</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="hint">Tip: the install buttons use your selected Launch type + Minecraft version for mod compatibility.</div>
+        </div>
+      </section>
+
       <section id="panelSkins" class="tab-panel" aria-label="Skins panel">
         <div class="card skins-card">
           <div class="card-head">
             <h2>Skins</h2>
-            <p>Upload a new skin for your selected Microsoft account. Offline profiles can't change online skins.</p>
+            <p>Shows a quick head preview for the selected account.</p>
           </div>
 
           <div class="skins-grid">
             <div class="skin-preview">
-              <div class="skin-preview-title">Current skin</div>
+              <div class="skin-preview-title">Skin head</div>
               <div id="skinPreviewBox" class="skin-preview-box">
-                <div class="empty-state">Select a Microsoft account to load skin info.</div>
+                <div class="empty-state">Select an account to load skin info.</div>
               </div>
             </div>
 
             <div class="skin-actions">
-              <label>
-                Skin PNG file
-                <input id="skinFile" type="file" accept="image/png" />
-              </label>
               <div class="action-row">
-                <button id="uploadClassicSkin" class="primary" type="button">Upload Classic</button>
-                <button id="uploadSlimSkin" class="ghost" type="button">Upload Slim</button>
-                <button id="refreshSkinButton" class="ghost" type="button">Refresh skin</button>
+                <button id="refreshSkinButton" class="ghost" type="button">Refresh preview</button>
               </div>
-              <div class="hint">Tip: classic is Steve arms, slim is Alex arms. Uploading changes your account's online skin.</div>
+              <div class="hint">Preview uses public skin render services. If your skin just changed, it can take a bit to update.</div>
             </div>
           </div>
         </div>
