@@ -229,7 +229,7 @@ public final class ZenClientMod implements ClientModInitializer {
     float yaw = Mth.wrapDegrees(player.getYRot());
     String heading = headingFromYaw(yaw);
     String pointer = buildCompassPointer(yaw);
-    compassLine = "Compass " + pointer + " " + heading;
+    compassLine = format("Compass %s %s %.1f°", pointer, heading, yaw);
     compassRefreshCooldown = COMPASS_REFRESH_TICKS;
   }
 
