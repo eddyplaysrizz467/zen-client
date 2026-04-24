@@ -641,6 +641,32 @@ function getVersionInstallInfo(minecraftRoot, versionId) {
   };
 }
 
+function repairInheritedVersionJar(minecraftRoot, versionId) {
+  const info = getVersionInstallInfo(minecraftRoot, versionId);
+  if (!info.jsonExists) return false;
+  if (info.jarExists && info.jarSize > 0) return true;
+
+  try {
+    const versionJson = JSON.parse(fs.readFileSync(info.jsonPath, "utf8"));
+    const inheritedVersion = String(versionJson.inheritsFrom || "").trim();
+    if (!inheritedVersion) return false;
+
+    const inheritedJarPath = path.join(minecraftRoot, "versions", inheritedVersion, `${inheritedVersion}.jar`);
+    if (!fs.existsSync(inheritedJarPath)) return false;
+
+    const inheritedJarSize = fs.statSync(inheritedJarPath).size;
+    if (inheritedJarSize <= 0) return false;
+
+    ensureDir(path.dirname(info.jarPath));
+    fs.copyFileSync(inheritedJarPath, info.jarPath);
+    appendLog(`[launch] Repaired ${versionId} by copying inherited jar from ${inheritedVersion}.`);
+    return true;
+  } catch (error) {
+    appendLog(`[launch] Could not repair ${versionId}: ${error?.message || String(error)}`);
+    return false;
+  }
+}
+
 function removeBrokenVersionInstall(minecraftRoot, versionId, label) {
   const info = getVersionInstallInfo(minecraftRoot, versionId);
   if (!fs.existsSync(info.versionDir)) return;
@@ -694,6 +720,7 @@ async function ensureFabricInstall(minecraftRoot, javaPath, minecraftVersion) {
   const versionId = `fabric-loader-${loaderVersion}-${minecraftVersion}`;
   const installInfo = getVersionInstallInfo(minecraftRoot, versionId);
   if (installInfo.isValid) return versionId;
+  if (repairInheritedVersionJar(minecraftRoot, versionId)) return versionId;
   if (installInfo.jsonExists || installInfo.jarExists) {
     removeBrokenVersionInstall(minecraftRoot, versionId, "fabric");
   }
@@ -726,6 +753,7 @@ async function ensureQuiltInstall(minecraftRoot, javaPath, minecraftVersion) {
   const versionId = `quilt-loader-${loaderVersion}-${minecraftVersion}`;
   let installInfo = getVersionInstallInfo(minecraftRoot, versionId);
   if (installInfo.isValid) return versionId;
+  if (repairInheritedVersionJar(minecraftRoot, versionId)) return versionId;
   if (installInfo.jsonExists || installInfo.jarExists) {
     removeBrokenVersionInstall(minecraftRoot, versionId, "quilt");
   }
@@ -761,6 +789,9 @@ async function ensureQuiltInstall(minecraftRoot, javaPath, minecraftVersion) {
   }
 
   installInfo = getVersionInstallInfo(minecraftRoot, versionId);
+  if (repairInheritedVersionJar(minecraftRoot, versionId)) {
+    installInfo = getVersionInstallInfo(minecraftRoot, versionId);
+  }
   if (installInfo.isValid) return versionId;
 
   // Fallback: some installers may choose a slightly different directory name.
