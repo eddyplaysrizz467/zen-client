@@ -22,6 +22,8 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.EntityHitResult;
@@ -37,17 +39,20 @@ public final class ZenClientMod implements ClientModInitializer {
   private static ZenConfig CONFIG;
   private static final Deque<Long> LEFT_CLICKS = new ArrayDeque<>();
   private static final Deque<Long> RIGHT_CLICKS = new ArrayDeque<>();
-  private static final Deque<Double> TPS_SAMPLES = new ArrayDeque<>();
+  private static final Deque<Double> SERVER_TPS_SAMPLES = new ArrayDeque<>();
 
   private static boolean lastAttackDown = false;
   private static boolean lastUseDown = false;
-  private static long lastTickAt = 0L;
-  private static double estimatedTps = 20.0D;
+  private static long lastServerSampleAt = 0L;
+  private static long lastWorldGameTime = Long.MIN_VALUE;
+  private static double estimatedServerTps = 20.0D;
   private static int comboCount = 0;
   private static long lastComboAt = 0L;
   private static double lastReach = 0.0D;
   private static float lastTargetHealth = -1.0F;
   private static float previousGamma = 1.0F;
+  private static boolean gammaBoostApplied = false;
+  private static boolean addedZenNightVision = false;
   private static int hitPulseTicks = 0;
   private static int compassRefreshCooldown = 0;
   private static String compassLine = "Compass [N]";
@@ -75,17 +80,9 @@ public final class ZenClientMod implements ClientModInitializer {
   }
 
   private void onEndTick(Minecraft client) {
-    long now = System.nanoTime();
-    if (lastTickAt != 0L) {
-      double instantTps = 1_000_000_000D / Math.max(now - lastTickAt, 1L);
-      TPS_SAMPLES.addLast(Mth.clamp(instantTps, 0.0D, 20.0D));
-      while (TPS_SAMPLES.size() > 40) TPS_SAMPLES.removeFirst();
-      estimatedTps = TPS_SAMPLES.stream().mapToDouble(Double::doubleValue).average().orElse(20.0D);
-    }
-    lastTickAt = now;
-
     if (client.player == null) {
-      pruneClicks(now);
+      pruneClicks(System.currentTimeMillis());
+      maintainFullbright(client, null);
       return;
     }
 
@@ -104,21 +101,14 @@ public final class ZenClientMod implements ClientModInitializer {
     pruneClicks(System.currentTimeMillis());
 
     LocalPlayer player = client.player;
+    updateEstimatedServerTps(client);
     updateCompass(player);
+    maintainFullbright(client, player);
 
     if (CONFIG.isEnabled(ZenFeature.TOGGLE_SPRINT) || CONFIG.isEnabled(ZenFeature.SPRINT_ASSIST)) {
       if (player.input != null && player.input.hasForwardImpulse() && !player.isShiftKeyDown()) {
         player.setSprinting(true);
       }
-    }
-
-    if (CONFIG.isEnabled(ZenFeature.FULLBRIGHT)) {
-      if (client.options.gamma().get().floatValue() < 12.0F) {
-        previousGamma = client.options.gamma().get().floatValue();
-        client.options.gamma().set(16.0D);
-      }
-    } else if (client.options.gamma().get().floatValue() > 12.0F) {
-      client.options.gamma().set((double) previousGamma);
     }
   }
 
@@ -139,16 +129,19 @@ public final class ZenClientMod implements ClientModInitializer {
   private void resetSession() {
     LEFT_CLICKS.clear();
     RIGHT_CLICKS.clear();
-    TPS_SAMPLES.clear();
+    SERVER_TPS_SAMPLES.clear();
     comboCount = 0;
     lastComboAt = 0L;
     lastReach = 0.0D;
     lastTargetHealth = -1.0F;
-    lastTickAt = 0L;
-    estimatedTps = 20.0D;
+    lastServerSampleAt = 0L;
+    lastWorldGameTime = Long.MIN_VALUE;
+    estimatedServerTps = 20.0D;
     hitPulseTicks = 0;
     compassRefreshCooldown = 0;
     compassLine = "Compass [N]";
+    gammaBoostApplied = false;
+    addedZenNightVision = false;
   }
 
   private void pruneClicks(long nowMs) {
@@ -220,6 +213,63 @@ public final class ZenClientMod implements ClientModInitializer {
     drawContext.drawString(client.font, Component.literal(text), x, y + 4, 0xFFFFFFFF, true);
   }
 
+  private void updateEstimatedServerTps(Minecraft client) {
+    if (client.level == null) return;
+
+    long now = System.currentTimeMillis();
+    long worldGameTime = client.level.getGameTime();
+
+    if (lastServerSampleAt == 0L || lastWorldGameTime == Long.MIN_VALUE) {
+      lastServerSampleAt = now;
+      lastWorldGameTime = worldGameTime;
+      return;
+    }
+
+    long elapsedMs = now - lastServerSampleAt;
+    long worldDelta = worldGameTime - lastWorldGameTime;
+    if (elapsedMs < 250L || worldDelta <= 0L) return;
+
+    double sample = Mth.clamp((worldDelta * 1000.0D) / elapsedMs, 0.0D, 20.0D);
+    SERVER_TPS_SAMPLES.addLast(sample);
+    while (SERVER_TPS_SAMPLES.size() > 20) SERVER_TPS_SAMPLES.removeFirst();
+    estimatedServerTps = SERVER_TPS_SAMPLES.stream().mapToDouble(Double::doubleValue).average().orElse(20.0D);
+    lastServerSampleAt = now;
+    lastWorldGameTime = worldGameTime;
+  }
+
+  private void maintainFullbright(Minecraft client, LocalPlayer player) {
+    if (CONFIG.isEnabled(ZenFeature.FULLBRIGHT)) {
+      if (!gammaBoostApplied) {
+        previousGamma = client.options.gamma().get().floatValue();
+        gammaBoostApplied = true;
+      }
+      if (client.options.gamma().get().floatValue() < 16.0F) {
+        client.options.gamma().set(16.0D);
+      }
+
+      if (player != null) {
+        MobEffectInstance currentNightVision = player.getEffect(MobEffects.NIGHT_VISION);
+        if (currentNightVision == null) {
+          player.addEffect(new MobEffectInstance(MobEffects.NIGHT_VISION, 220, 0, true, false, false));
+          addedZenNightVision = true;
+        } else if (addedZenNightVision && currentNightVision.getDuration() < 120) {
+          player.addEffect(new MobEffectInstance(MobEffects.NIGHT_VISION, 220, 0, true, false, false));
+        }
+      }
+      return;
+    }
+
+    if (gammaBoostApplied) {
+      client.options.gamma().set((double) previousGamma);
+      gammaBoostApplied = false;
+    }
+
+    if (player != null && addedZenNightVision && player.hasEffect(MobEffects.NIGHT_VISION)) {
+      player.removeEffect(MobEffects.NIGHT_VISION);
+    }
+    addedZenNightVision = false;
+  }
+
   private void updateCompass(LocalPlayer player) {
     if (compassRefreshCooldown > 0) {
       compassRefreshCooldown -= 1;
@@ -258,7 +308,7 @@ public final class ZenClientMod implements ClientModInitializer {
 
     for (ZenFeature feature : CONFIG.orderedEnabledFeatures()) {
       String text = switch (feature) {
-        case TPS_COUNTER -> format("TPS %.1f", estimatedTps);
+        case TPS_COUNTER -> format("TPS %.1f", estimatedServerTps);
         case FPS_COUNTER -> "FPS " + Minecraft.getInstance().getFps();
         case PING_COUNTER -> buildPing(client);
         case COORDINATES -> format("XYZ %d %d %d", Mth.floor(player.getX()), Mth.floor(player.getY()), Mth.floor(player.getZ()));

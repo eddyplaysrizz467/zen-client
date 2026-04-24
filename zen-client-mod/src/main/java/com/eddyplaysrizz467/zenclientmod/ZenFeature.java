@@ -1,7 +1,7 @@
 package com.eddyplaysrizz467.zenclientmod;
 
 public enum ZenFeature {
-  TPS_COUNTER("tps_counter", "TPS Counter", "Shows your current client-side tick rate."),
+  TPS_COUNTER("tps_counter", "TPS Counter", "Shows an estimated server tick rate."),
   FPS_COUNTER("fps_counter", "FPS Counter", "Shows your current FPS."),
   PING_COUNTER("ping_counter", "Ping Counter", "Shows your current connection latency."),
   COORDINATES("coordinates", "Coordinates", "Shows your XYZ position."),
@@ -21,7 +21,7 @@ public enum ZenFeature {
   SPRINT_ASSIST("sprint_assist", "Sprint Assist", "Re-applies sprint while you are moving."),
   CLEAN_CROSSHAIR("clean_crosshair", "Clean Crosshair", "Adds a simple crosshair module tag."),
   HIT_COLOR("hit_color", "Hit Color Pulse", "Adds a hit-feedback module tag."),
-  FULLBRIGHT("fullbright", "Fullbright", "Boosts gamma while enabled.");
+  FULLBRIGHT("fullbright", "Fullbright", "Forces brighter visuals while enabled.");
 
   private final String id;
   private final String label;
