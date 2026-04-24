@@ -30,7 +30,7 @@ public final class ZenClientMod implements ClientModInitializer {
   private static final int MAX_VISIBLE_MODULES = 5;
   private static final long CLICK_WINDOW_MS = 1000L;
   private static final int HUD_BOX_PADDING = 4;
-  private static final int HUD_BOX_HEIGHT = 14;
+  private static final int HUD_BOX_HEIGHT = 18;
   private static final int HUD_BOX_GAP = 4;
   private static final int COMPASS_REFRESH_TICKS = 2;
 
@@ -174,15 +174,15 @@ public final class ZenClientMod implements ClientModInitializer {
     for (int i = 0; i < visible; i++) {
       String text = modules.get(i);
       int top = y + (i * (HUD_BOX_HEIGHT + HUD_BOX_GAP));
-      int width = client.font.width(text);
+      int width = Math.max(60, client.font.width(text));
       drawContext.fill(
         x - HUD_BOX_PADDING,
-        top - HUD_BOX_PADDING + 1,
+        top - HUD_BOX_PADDING,
         x + width + HUD_BOX_PADDING,
         top + HUD_BOX_HEIGHT,
         0x8C050505
       );
-      drawContext.drawString(client.font, text, x, top, 0xFFFFFF, true);
+      drawContext.drawString(client.font, Component.literal(text), x, top + 4, 0xFFFFFF, true);
     }
 
     int hiddenCount = modules.size() - visible;
@@ -192,12 +192,12 @@ public final class ZenClientMod implements ClientModInitializer {
       int width = client.font.width(overflow);
       drawContext.fill(
         x - HUD_BOX_PADDING,
-        overflowTop - HUD_BOX_PADDING + 1,
+        overflowTop - HUD_BOX_PADDING,
         x + width + HUD_BOX_PADDING,
         overflowTop + HUD_BOX_HEIGHT,
         0x6A202020
       );
-      drawContext.drawString(client.font, overflow, x, overflowTop, 0xD7D7D7, true);
+      drawContext.drawString(client.font, Component.literal(overflow), x, overflowTop + 4, 0xD7D7D7, true);
     }
   }
 
@@ -212,12 +212,12 @@ public final class ZenClientMod implements ClientModInitializer {
 
     drawContext.fill(
       x - HUD_BOX_PADDING,
-      y - HUD_BOX_PADDING + 1,
+      y - HUD_BOX_PADDING,
       x + textWidth + HUD_BOX_PADDING,
       y + HUD_BOX_HEIGHT,
       0x8C050505
     );
-    drawContext.drawString(client.font, text, x, y, 0xFFFFFF, true);
+    drawContext.drawString(client.font, Component.literal(text), x, y + 4, 0xFFFFFF, true);
   }
 
   private void updateCompass(LocalPlayer player) {
