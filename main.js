@@ -1198,8 +1198,14 @@ ipcMain.handle("account:microsoftLogin", async () => {
   };
 });
 ipcMain.handle("launch:start", async (_event, settings) => {
-  await launchGame(settings);
-  return true;
+  try {
+    await launchGame(settings);
+    return true;
+  } catch (error) {
+    const message = formatInvokeError(error);
+    appendLog(`[launch] Failed to start: ${message}`);
+    throw new Error(message);
+  }
 });
 
 ipcMain.handle("shell:openExternal", async (_event, url) => {
