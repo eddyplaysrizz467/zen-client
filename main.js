@@ -623,6 +623,31 @@ async function ensureFile(url, targetPath) {
   return targetPath;
 }
 
+function getVersionInstallInfo(minecraftRoot, versionId) {
+  const versionDir = path.join(minecraftRoot, "versions", versionId);
+  const jsonPath = path.join(versionDir, `${versionId}.json`);
+  const jarPath = path.join(versionDir, `${versionId}.jar`);
+  const jsonExists = fs.existsSync(jsonPath);
+  const jarExists = fs.existsSync(jarPath);
+  const jarSize = jarExists ? fs.statSync(jarPath).size : 0;
+  return {
+    versionDir,
+    jsonPath,
+    jarPath,
+    jsonExists,
+    jarExists,
+    jarSize,
+    isValid: jsonExists && jarExists && jarSize > 0
+  };
+}
+
+function removeBrokenVersionInstall(minecraftRoot, versionId, label) {
+  const info = getVersionInstallInfo(minecraftRoot, versionId);
+  if (!fs.existsSync(info.versionDir)) return;
+  appendLog(`[${label}] Found broken install for ${versionId}; repairing it now.`);
+  fs.rmSync(info.versionDir, { recursive: true, force: true });
+}
+
 function spawnLogged(command, args, label) {
   return new Promise((resolve, reject) => {
     appendLog(`[${label}] ${command} ${args.join(" ")}`);
@@ -667,8 +692,11 @@ async function ensureFabricInstall(minecraftRoot, javaPath, minecraftVersion) {
   const loaderVersion = await getLatestFabricLoader(minecraftVersion);
   if (!loaderVersion) throw new Error("Could not find a Fabric loader for that version.");
   const versionId = `fabric-loader-${loaderVersion}-${minecraftVersion}`;
-  const versionFile = path.join(minecraftRoot, "versions", versionId, `${versionId}.json`);
-  if (fs.existsSync(versionFile)) return versionId;
+  const installInfo = getVersionInstallInfo(minecraftRoot, versionId);
+  if (installInfo.isValid) return versionId;
+  if (installInfo.jsonExists || installInfo.jarExists) {
+    removeBrokenVersionInstall(minecraftRoot, versionId, "fabric");
+  }
 
   const installers = await fetchJson("https://meta.fabricmc.net/v2/versions/installer");
   const installer = installers.find((item) => item.stable) || installers[0];
@@ -696,8 +724,11 @@ async function ensureQuiltInstall(minecraftRoot, javaPath, minecraftVersion) {
   const loaderVersion = await getLatestQuiltLoader(minecraftVersion);
   if (!loaderVersion) throw new Error("Could not find a Quilt loader for that version.");
   const versionId = `quilt-loader-${loaderVersion}-${minecraftVersion}`;
-  const versionFile = path.join(minecraftRoot, "versions", versionId, `${versionId}.json`);
-  if (fs.existsSync(versionFile)) return versionId;
+  let installInfo = getVersionInstallInfo(minecraftRoot, versionId);
+  if (installInfo.isValid) return versionId;
+  if (installInfo.jsonExists || installInfo.jarExists) {
+    removeBrokenVersionInstall(minecraftRoot, versionId, "quilt");
+  }
 
   const installers = await fetchJson("https://meta.quiltmc.org/v3/versions/installer");
   const installer = installers[0];
@@ -729,7 +760,8 @@ async function ensureQuiltInstall(minecraftRoot, javaPath, minecraftVersion) {
     );
   }
 
-  if (fs.existsSync(versionFile)) return versionId;
+  installInfo = getVersionInstallInfo(minecraftRoot, versionId);
+  if (installInfo.isValid) return versionId;
 
   // Fallback: some installers may choose a slightly different directory name.
   const versionsDir = path.join(minecraftRoot, "versions");
@@ -741,7 +773,7 @@ async function ensureQuiltInstall(minecraftRoot, javaPath, minecraftVersion) {
             entry.isDirectory() &&
             entry.name.startsWith("quilt-loader-") &&
             entry.name.endsWith(`-${minecraftVersion}`) &&
-            fs.existsSync(path.join(versionsDir, entry.name, `${entry.name}.json`))
+            getVersionInstallInfo(minecraftRoot, entry.name).isValid
         )
         .map((entry) => {
           const full = path.join(versionsDir, entry.name);
