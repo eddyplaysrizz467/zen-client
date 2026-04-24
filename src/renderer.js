@@ -285,10 +285,18 @@ function appendLog(message) {
   logBox.scrollTop = logBox.scrollHeight;
 
   const line = String(message || "").toLowerCase();
-  if (line.includes("joining server") || line.includes("connecting to")) {
+  if (line.includes("joining server")) {
+    statusText.textContent = "Enjoy!";
+  } else if (
+    line.includes("loading world") ||
+    line.includes("joining world") ||
+    line.includes("starting integrated server") ||
+    line.includes("preparing spawn area") ||
+    line.includes("connecting to")
+  ) {
     statusText.textContent = "Loading peace...";
-  } else if (line.includes("loading terrain")) {
-    statusText.textContent = "Have fun!";
+  } else if (line.includes("generating terrain") || line.includes("loading terrain")) {
+    statusText.textContent = "Giving you peace...";
   }
 }
 

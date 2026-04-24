@@ -311,11 +311,12 @@ function getDiscordActivity(state) {
   const base = { startTimestamp: Math.floor(now / 1000) };
 
   if (currentSession && settings.discordShowPlaying) {
-    const details = `Zen Client - ${currentSession.launchType || "Vanilla"}`;
-    let stateLine = `Playing ${currentSession.version || ""}`.trim();
-    if (currentSession.phase === "loading_peace") stateLine = "Loading peace...";
-    if (currentSession.phase === "have_fun") stateLine = "Have fun!";
-    return {
+      const details = `Zen Client - ${currentSession.launchType || "Vanilla"}`;
+      let stateLine = `Playing ${currentSession.version || ""}`.trim();
+      if (currentSession.phase === "loading_peace") stateLine = "Loading peace...";
+      if (currentSession.phase === "giving_peace") stateLine = "Giving you peace...";
+      if (currentSession.phase === "enjoy") stateLine = "Enjoy!";
+      return {
       ...base,
       details,
       state: stateLine || "In game",
@@ -340,8 +341,19 @@ function updateSessionPhaseFromLog(line) {
   if (!currentSession) return;
   const text = String(line || "").toLowerCase();
   let next = null;
-  if (text.includes("joining server") || text.includes("connecting to")) next = "loading_peace";
-  if (text.includes("loading terrain")) next = "have_fun";
+  if (text.includes("joining server")) {
+    next = "enjoy";
+  } else if (
+    text.includes("loading world") ||
+    text.includes("joining world") ||
+    text.includes("starting integrated server") ||
+    text.includes("preparing spawn area") ||
+    text.includes("connecting to")
+  ) {
+    next = "loading_peace";
+  } else if (text.includes("generating terrain") || text.includes("loading terrain")) {
+    next = "giving_peace";
+  }
   if (next && currentSession.phase !== next) {
     currentSession.phase = next;
     setDiscordPresence();
