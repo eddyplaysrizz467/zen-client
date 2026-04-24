@@ -31,6 +31,7 @@ import net.minecraft.world.phys.EntityHitResult;
 public final class ZenClientMod implements ClientModInitializer {
   private static final int MAX_VISIBLE_MODULES = 5;
   private static final long CLICK_WINDOW_MS = 1000L;
+  private static final int FULLBRIGHT_NIGHT_VISION_DURATION = 1_000_000;
   private static final int HUD_BOX_PADDING = 4;
   private static final int HUD_BOX_HEIGHT = 18;
   private static final int HUD_BOX_GAP = 4;
@@ -250,10 +251,10 @@ public final class ZenClientMod implements ClientModInitializer {
       if (player != null) {
         MobEffectInstance currentNightVision = player.getEffect(MobEffects.NIGHT_VISION);
         if (currentNightVision == null) {
-          player.addEffect(new MobEffectInstance(MobEffects.NIGHT_VISION, 220, 0, true, false, false));
+          player.addEffect(new MobEffectInstance(MobEffects.NIGHT_VISION, FULLBRIGHT_NIGHT_VISION_DURATION, 0, true, false, false));
           addedZenNightVision = true;
-        } else if (addedZenNightVision && currentNightVision.getDuration() < 120) {
-          player.addEffect(new MobEffectInstance(MobEffects.NIGHT_VISION, 220, 0, true, false, false));
+        } else if (addedZenNightVision && currentNightVision.getDuration() < FULLBRIGHT_NIGHT_VISION_DURATION / 2) {
+          player.addEffect(new MobEffectInstance(MobEffects.NIGHT_VISION, FULLBRIGHT_NIGHT_VISION_DURATION, 0, true, false, false));
         }
       }
       return;
