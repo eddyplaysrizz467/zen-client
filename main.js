@@ -291,7 +291,7 @@ function initAutoUpdater() {
   if (updatePollTimer) clearInterval(updatePollTimer);
   updatePollTimer = setInterval(() => {
     autoUpdaterRef.checkForUpdates().catch(() => {});
-  }, 10_000);
+  }, 5_000);
 }
 
 function sanitizeAccount(account) {

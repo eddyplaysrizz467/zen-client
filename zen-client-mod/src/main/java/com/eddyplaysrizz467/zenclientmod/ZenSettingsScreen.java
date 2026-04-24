@@ -54,7 +54,7 @@ public final class ZenSettingsScreen extends Screen {
   public void render(GuiGraphics context, int mouseX, int mouseY, float delta) {
     super.render(context, mouseX, mouseY, delta);
     context.drawCenteredString(this.font, this.title, this.width / 2, 16, 0xF3F3F3);
-    context.drawCenteredString(this.font, Component.literal("20 PvP/QoL toggles for Zen Client"), this.width / 2, 30, 0x9A9A9A);
+    context.drawCenteredString(this.font, Component.literal("21 PvP/QoL toggles for Zen Client"), this.width / 2, 30, 0x9A9A9A);
   }
 
   @Override

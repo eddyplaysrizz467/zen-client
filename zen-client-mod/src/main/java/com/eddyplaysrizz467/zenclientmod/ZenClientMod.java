@@ -30,7 +30,9 @@ public final class ZenClientMod implements ClientModInitializer {
   private static final int MAX_VISIBLE_MODULES = 5;
   private static final long CLICK_WINDOW_MS = 1000L;
   private static final int HUD_BOX_PADDING = 4;
-  private static final int HUD_LINE_HEIGHT = 12;
+  private static final int HUD_BOX_HEIGHT = 14;
+  private static final int HUD_BOX_GAP = 4;
+  private static final int COMPASS_REFRESH_TICKS = 2;
 
   private static ZenConfig CONFIG;
   private static final Deque<Long> LEFT_CLICKS = new ArrayDeque<>();
@@ -47,7 +49,8 @@ public final class ZenClientMod implements ClientModInitializer {
   private static float lastTargetHealth = -1.0F;
   private static float previousGamma = 1.0F;
   private static int hitPulseTicks = 0;
-  private static int hudOverlayCooldown = 0;
+  private static int compassRefreshCooldown = 0;
+  private static String compassLine = "Compass [N]";
 
   public static ZenConfig config() {
     return CONFIG;
@@ -101,7 +104,7 @@ public final class ZenClientMod implements ClientModInitializer {
     pruneClicks(System.currentTimeMillis());
 
     LocalPlayer player = client.player;
-    updateHudOverlay(client);
+    updateCompass(player);
 
     if (CONFIG.isEnabled(ZenFeature.TOGGLE_SPRINT) || CONFIG.isEnabled(ZenFeature.SPRINT_ASSIST)) {
       if (player.input != null && player.input.hasForwardImpulse() && !player.isShiftKeyDown()) {
@@ -144,7 +147,8 @@ public final class ZenClientMod implements ClientModInitializer {
     lastTickAt = 0L;
     estimatedTps = 20.0D;
     hitPulseTicks = 0;
-    hudOverlayCooldown = 0;
+    compassRefreshCooldown = 0;
+    compassLine = "Compass [N]";
   }
 
   private void pruneClicks(long nowMs) {
@@ -165,58 +169,48 @@ public final class ZenClientMod implements ClientModInitializer {
     int x = 8;
     int y = 8;
     int visible = Math.min(MAX_VISIBLE_MODULES, modules.size());
-    int maxWidth = 0;
 
     for (int i = 0; i < visible; i++) {
-      maxWidth = Math.max(maxWidth, client.font.width(modules.get(i)));
-    }
-    if (modules.size() > visible) {
-      maxWidth = Math.max(maxWidth, client.font.width(modules.get(0)) + 28);
-    }
-
-    int boxHeight = (visible * HUD_LINE_HEIGHT) + (HUD_BOX_PADDING * 2);
-    drawContext.fill(
-      x - HUD_BOX_PADDING,
-      y - HUD_BOX_PADDING,
-      x + maxWidth + HUD_BOX_PADDING,
-      y + boxHeight - HUD_BOX_PADDING,
-      0x6A050505
-    );
-
-    for (int i = 0; i < visible; i++) {
-      drawContext.drawString(client.font, modules.get(i), x, y + (i * HUD_LINE_HEIGHT), 0xF3F3F3, true);
+      String text = modules.get(i);
+      int top = y + (i * (HUD_BOX_HEIGHT + HUD_BOX_GAP));
+      int width = client.font.width(text);
+      drawContext.fill(
+        x - HUD_BOX_PADDING,
+        top - HUD_BOX_PADDING + 1,
+        x + width + HUD_BOX_PADDING,
+        top + HUD_BOX_HEIGHT,
+        0x8C050505
+      );
+      drawContext.drawString(client.font, text, x, top, 0xF3F3F3, false);
     }
 
     int hiddenCount = modules.size() - visible;
     if (hiddenCount > 0) {
       String overflow = "+" + hiddenCount;
-      int firstWidth = client.font.width(modules.get(0));
-      drawContext.drawString(client.font, overflow, x + firstWidth + 8, y, 0xBFBFBF, true);
+      int overflowTop = y + (visible * (HUD_BOX_HEIGHT + HUD_BOX_GAP));
+      int width = client.font.width(overflow);
+      drawContext.fill(
+        x - HUD_BOX_PADDING,
+        overflowTop - HUD_BOX_PADDING + 1,
+        x + width + HUD_BOX_PADDING,
+        overflowTop + HUD_BOX_HEIGHT,
+        0x6A202020
+      );
+      drawContext.drawString(client.font, overflow, x, overflowTop, 0xBFBFBF, false);
     }
   }
 
-  private void updateHudOverlay(Minecraft client) {
-    if (client == null || client.player == null || client.options.hideGui) return;
-    if (hudOverlayCooldown > 0) {
-      hudOverlayCooldown -= 1;
+  private void updateCompass(LocalPlayer player) {
+    if (compassRefreshCooldown > 0) {
+      compassRefreshCooldown -= 1;
       return;
     }
 
-    List<String> modules = buildModules(client);
-    if (modules.isEmpty()) return;
-
-    int visible = Math.min(MAX_VISIBLE_MODULES, modules.size());
-    StringBuilder line = new StringBuilder("Zen Client: ");
-    for (int i = 0; i < visible; i++) {
-      if (i > 0) line.append(" | ");
-      line.append(modules.get(i));
-    }
-    if (modules.size() > visible) {
-      line.append(" | +").append(modules.size() - visible);
-    }
-
-    client.gui.setOverlayMessage(Component.literal(line.toString()), false);
-    hudOverlayCooldown = 20;
+    float yaw = Mth.wrapDegrees(player.getYRot());
+    String heading = headingFromYaw(yaw);
+    String pointer = buildCompassPointer(yaw);
+    compassLine = "Compass " + pointer + " " + heading;
+    compassRefreshCooldown = COMPASS_REFRESH_TICKS;
   }
 
   private void renderCenterEffects(Minecraft client, GuiGraphics drawContext) {
@@ -248,6 +242,7 @@ public final class ZenClientMod implements ClientModInitializer {
         case FPS_COUNTER -> "FPS " + Minecraft.getInstance().getFps();
         case PING_COUNTER -> buildPing(client);
         case COORDINATES -> format("XYZ %d %d %d", Mth.floor(player.getX()), Mth.floor(player.getY()), Mth.floor(player.getZ()));
+        case COMPASS -> compassLine;
         case DIRECTION -> "Facing " + player.getDirection().getName();
         case CPS_COUNTER -> "CPS " + LEFT_CLICKS.size() + " | " + RIGHT_CLICKS.size();
         case COMBO_COUNTER -> "Combo " + comboCount;
@@ -339,5 +334,30 @@ public final class ZenClientMod implements ClientModInitializer {
 
   private String format(String pattern, Object... args) {
     return String.format(Locale.US, pattern, args);
+  }
+
+  private String headingFromYaw(float yaw) {
+    if (yaw >= -22.5F && yaw < 22.5F) return "S";
+    if (yaw >= 22.5F && yaw < 67.5F) return "SW";
+    if (yaw >= 67.5F && yaw < 112.5F) return "W";
+    if (yaw >= 112.5F && yaw < 157.5F) return "NW";
+    if (yaw >= 157.5F || yaw < -157.5F) return "N";
+    if (yaw >= -157.5F && yaw < -112.5F) return "NE";
+    if (yaw >= -112.5F && yaw < -67.5F) return "E";
+    return "SE";
+  }
+
+  private String buildCompassPointer(float yaw) {
+    String[] ring = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+    float normalized = Mth.wrapDegrees(yaw + 180.0F);
+    int center = Math.floorMod(Math.round(normalized / 45.0F), ring.length);
+    StringBuilder out = new StringBuilder("[");
+    for (int offset = -2; offset <= 2; offset++) {
+      if (offset > -2) out.append(" ");
+      String label = ring[Math.floorMod(center + offset, ring.length)];
+      out.append(offset == 0 ? ">" + label + "<" : label);
+    }
+    out.append("]");
+    return out.toString();
   }
 }

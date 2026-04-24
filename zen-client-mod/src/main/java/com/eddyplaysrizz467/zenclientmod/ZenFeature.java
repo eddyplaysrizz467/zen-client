@@ -5,6 +5,7 @@ public enum ZenFeature {
   FPS_COUNTER("fps_counter", "FPS Counter", "Shows your current FPS."),
   PING_COUNTER("ping_counter", "Ping Counter", "Shows your current connection latency."),
   COORDINATES("coordinates", "Coordinates", "Shows your XYZ position."),
+  COMPASS("compass", "Compass", "Shows a live compass that points where you are looking."),
   DIRECTION("direction", "Direction", "Shows the direction you are facing."),
   CPS_COUNTER("cps_counter", "CPS Counter", "Shows left and right clicks per second."),
   COMBO_COUNTER("combo_counter", "Combo Counter", "Tracks recent hit combos."),
