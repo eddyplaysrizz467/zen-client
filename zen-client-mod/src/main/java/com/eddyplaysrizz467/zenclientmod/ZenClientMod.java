@@ -44,6 +44,7 @@ public final class ZenClientMod implements ClientModInitializer {
   private static double lastReach = 0.0D;
   private static float lastTargetHealth = -1.0F;
   private static float previousGamma = 1.0F;
+  private static int hitPulseTicks = 0;
 
   public static ZenConfig config() {
     return CONFIG;
@@ -119,6 +120,7 @@ public final class ZenClientMod implements ClientModInitializer {
 
     lastReach = Math.sqrt(client.player.distanceToSqr(living));
     lastTargetHealth = living.getHealth();
+    hitPulseTicks = 10;
 
     long now = System.currentTimeMillis();
     if (now - lastComboAt <= 2000L) comboCount += 1;
@@ -136,16 +138,20 @@ public final class ZenClientMod implements ClientModInitializer {
     lastTargetHealth = -1.0F;
     lastTickAt = 0L;
     estimatedTps = 20.0D;
+    hitPulseTicks = 0;
   }
 
   private void pruneClicks(long nowMs) {
     while (!LEFT_CLICKS.isEmpty() && nowMs - LEFT_CLICKS.peekFirst() > CLICK_WINDOW_MS) LEFT_CLICKS.removeFirst();
     while (!RIGHT_CLICKS.isEmpty() && nowMs - RIGHT_CLICKS.peekFirst() > CLICK_WINDOW_MS) RIGHT_CLICKS.removeFirst();
     if (nowMs - lastComboAt > 2000L) comboCount = 0;
+    if (hitPulseTicks > 0) hitPulseTicks -= 1;
   }
 
   private void renderHud(Minecraft client, GuiGraphics drawContext) {
     if (client == null || client.player == null || client.options.hideGui) return;
+
+    renderCenterEffects(client, drawContext);
 
     List<String> modules = buildModules(client);
     if (modules.isEmpty()) return;
@@ -164,6 +170,25 @@ public final class ZenClientMod implements ClientModInitializer {
       String overflow = "+" + hiddenCount;
       int firstWidth = client.font.width(modules.get(0));
       drawContext.drawString(client.font, overflow, x + firstWidth + 8, y, 0xBFBFBF, true);
+    }
+  }
+
+  private void renderCenterEffects(Minecraft client, GuiGraphics drawContext) {
+    int centerX = client.getWindow().getGuiScaledWidth() / 2;
+    int centerY = client.getWindow().getGuiScaledHeight() / 2;
+
+    if (CONFIG.isEnabled(ZenFeature.CLEAN_CROSSHAIR)) {
+      int color = 0xF3F3F3;
+      drawContext.fill(centerX - 1, centerY - 6, centerX + 1, centerY - 1, color);
+      drawContext.fill(centerX - 1, centerY + 2, centerX + 1, centerY + 7, color);
+      drawContext.fill(centerX - 6, centerY - 1, centerX - 1, centerY + 1, color);
+      drawContext.fill(centerX + 2, centerY - 1, centerX + 7, centerY + 1, color);
+    }
+
+    if (CONFIG.isEnabled(ZenFeature.HIT_COLOR) && hitPulseTicks > 0) {
+      int alpha = Math.max(25, Math.min(120, hitPulseTicks * 10));
+      int color = (alpha << 24) | 0xF3F3F3;
+      drawContext.fill(centerX - 10, centerY - 10, centerX + 10, centerY + 10, color);
     }
   }
 
@@ -188,8 +213,8 @@ public final class ZenClientMod implements ClientModInitializer {
         case ARMOR_STATUS -> buildArmorStatus(player);
         case POTION_STATUS -> "Effects " + player.getActiveEffects().size();
         case TARGET_HEALTH -> lastTargetHealth >= 0.0F ? format("Target %.1f", lastTargetHealth) : "Target --";
-        case TOGGLE_SPRINT -> player.isSprinting() ? "Toggle Sprint" : null;
-        case SPRINT_ASSIST -> player.isSprinting() ? "Sprint Assist" : null;
+        case TOGGLE_SPRINT -> "Toggle Sprint";
+        case SPRINT_ASSIST -> "Sprint Assist";
         case CLEAN_CROSSHAIR -> "Clean Crosshair";
         case HIT_COLOR -> "Hit Color Pulse";
         case FULLBRIGHT -> "Fullbright";

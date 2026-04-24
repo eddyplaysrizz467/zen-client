@@ -800,6 +800,10 @@ async function modrinthPickDownload(slug, minecraftVersion, launchType) {
 async function ensureModrinthMods(minecraftRoot, minecraftVersion, launchType) {
   const selected = String(launchType || "").toLowerCase();
   if (selected !== "fabric" && selected !== "quilt") return;
+  if (selected === "quilt") {
+    appendLog("[mods] Skipping automatic performance mod pack for Quilt to avoid loader compatibility issues.");
+    return;
+  }
 
   const modsDir = path.join(minecraftRoot, "mods");
   ensureDir(modsDir);
