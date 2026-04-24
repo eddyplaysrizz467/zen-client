@@ -32,7 +32,7 @@ public final class ZenClientMod implements ClientModInitializer {
   private static final int HUD_BOX_PADDING = 4;
   private static final int HUD_BOX_HEIGHT = 18;
   private static final int HUD_BOX_GAP = 4;
-  private static final int COMPASS_REFRESH_TICKS = 2;
+  private static final int COMPASS_REFRESH_TICKS = 1;
 
   private static ZenConfig CONFIG;
   private static final Deque<Long> LEFT_CLICKS = new ArrayDeque<>();
