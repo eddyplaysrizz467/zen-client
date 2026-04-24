@@ -29,6 +29,8 @@ import net.minecraft.world.phys.EntityHitResult;
 public final class ZenClientMod implements ClientModInitializer {
   private static final int MAX_VISIBLE_MODULES = 5;
   private static final long CLICK_WINDOW_MS = 1000L;
+  private static final int HUD_BOX_PADDING = 4;
+  private static final int HUD_LINE_HEIGHT = 12;
 
   private static ZenConfig CONFIG;
   private static final Deque<Long> LEFT_CLICKS = new ArrayDeque<>();
@@ -45,6 +47,7 @@ public final class ZenClientMod implements ClientModInitializer {
   private static float lastTargetHealth = -1.0F;
   private static float previousGamma = 1.0F;
   private static int hitPulseTicks = 0;
+  private static int hudOverlayCooldown = 0;
 
   public static ZenConfig config() {
     return CONFIG;
@@ -98,6 +101,8 @@ public final class ZenClientMod implements ClientModInitializer {
     pruneClicks(System.currentTimeMillis());
 
     LocalPlayer player = client.player;
+    updateHudOverlay(client);
+
     if (CONFIG.isEnabled(ZenFeature.TOGGLE_SPRINT) || CONFIG.isEnabled(ZenFeature.SPRINT_ASSIST)) {
       if (player.input != null && player.input.hasForwardImpulse() && !player.isShiftKeyDown()) {
         player.setSprinting(true);
@@ -139,6 +144,7 @@ public final class ZenClientMod implements ClientModInitializer {
     lastTickAt = 0L;
     estimatedTps = 20.0D;
     hitPulseTicks = 0;
+    hudOverlayCooldown = 0;
   }
 
   private void pruneClicks(long nowMs) {
@@ -158,11 +164,27 @@ public final class ZenClientMod implements ClientModInitializer {
 
     int x = 8;
     int y = 8;
-    int lineHeight = 12;
     int visible = Math.min(MAX_VISIBLE_MODULES, modules.size());
+    int maxWidth = 0;
 
     for (int i = 0; i < visible; i++) {
-      drawContext.drawString(client.font, modules.get(i), x, y + (i * lineHeight), 0xF3F3F3, true);
+      maxWidth = Math.max(maxWidth, client.font.width(modules.get(i)));
+    }
+    if (modules.size() > visible) {
+      maxWidth = Math.max(maxWidth, client.font.width(modules.get(0)) + 28);
+    }
+
+    int boxHeight = (visible * HUD_LINE_HEIGHT) + (HUD_BOX_PADDING * 2);
+    drawContext.fill(
+      x - HUD_BOX_PADDING,
+      y - HUD_BOX_PADDING,
+      x + maxWidth + HUD_BOX_PADDING,
+      y + boxHeight - HUD_BOX_PADDING,
+      0x6A050505
+    );
+
+    for (int i = 0; i < visible; i++) {
+      drawContext.drawString(client.font, modules.get(i), x, y + (i * HUD_LINE_HEIGHT), 0xF3F3F3, true);
     }
 
     int hiddenCount = modules.size() - visible;
@@ -171,6 +193,30 @@ public final class ZenClientMod implements ClientModInitializer {
       int firstWidth = client.font.width(modules.get(0));
       drawContext.drawString(client.font, overflow, x + firstWidth + 8, y, 0xBFBFBF, true);
     }
+  }
+
+  private void updateHudOverlay(Minecraft client) {
+    if (client == null || client.player == null || client.options.hideGui) return;
+    if (hudOverlayCooldown > 0) {
+      hudOverlayCooldown -= 1;
+      return;
+    }
+
+    List<String> modules = buildModules(client);
+    if (modules.isEmpty()) return;
+
+    int visible = Math.min(MAX_VISIBLE_MODULES, modules.size());
+    StringBuilder line = new StringBuilder("Zen Client: ");
+    for (int i = 0; i < visible; i++) {
+      if (i > 0) line.append(" | ");
+      line.append(modules.get(i));
+    }
+    if (modules.size() > visible) {
+      line.append(" | +").append(modules.size() - visible);
+    }
+
+    client.gui.setOverlayMessage(Component.literal(line.toString()), false);
+    hudOverlayCooldown = 20;
   }
 
   private void renderCenterEffects(Minecraft client, GuiGraphics drawContext) {
