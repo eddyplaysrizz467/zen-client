@@ -162,6 +162,7 @@ public final class ZenClientMod implements ClientModInitializer {
     if (client == null || client.player == null || client.options.hideGui) return;
 
     renderCenterEffects(client, drawContext);
+    renderCompassHud(client, drawContext);
 
     List<String> modules = buildModules(client);
     if (modules.isEmpty()) return;
@@ -181,7 +182,7 @@ public final class ZenClientMod implements ClientModInitializer {
         top + HUD_BOX_HEIGHT,
         0x8C050505
       );
-      drawContext.drawString(client.font, text, x, top, 0xF3F3F3, false);
+      drawContext.drawString(client.font, text, x, top, 0xFFFFFF, true);
     }
 
     int hiddenCount = modules.size() - visible;
@@ -196,8 +197,27 @@ public final class ZenClientMod implements ClientModInitializer {
         overflowTop + HUD_BOX_HEIGHT,
         0x6A202020
       );
-      drawContext.drawString(client.font, overflow, x, overflowTop, 0xBFBFBF, false);
+      drawContext.drawString(client.font, overflow, x, overflowTop, 0xD7D7D7, true);
     }
+  }
+
+  private void renderCompassHud(Minecraft client, GuiGraphics drawContext) {
+    if (!CONFIG.isEnabled(ZenFeature.COMPASS)) return;
+
+    String text = compassLine;
+    int textWidth = client.font.width(text);
+    int centerX = client.getWindow().getGuiScaledWidth() / 2;
+    int x = centerX - (textWidth / 2);
+    int y = client.getWindow().getGuiScaledHeight() - 42;
+
+    drawContext.fill(
+      x - HUD_BOX_PADDING,
+      y - HUD_BOX_PADDING + 1,
+      x + textWidth + HUD_BOX_PADDING,
+      y + HUD_BOX_HEIGHT,
+      0x8C050505
+    );
+    drawContext.drawString(client.font, text, x, y, 0xFFFFFF, true);
   }
 
   private void updateCompass(LocalPlayer player) {
@@ -242,7 +262,6 @@ public final class ZenClientMod implements ClientModInitializer {
         case FPS_COUNTER -> "FPS " + Minecraft.getInstance().getFps();
         case PING_COUNTER -> buildPing(client);
         case COORDINATES -> format("XYZ %d %d %d", Mth.floor(player.getX()), Mth.floor(player.getY()), Mth.floor(player.getZ()));
-        case COMPASS -> compassLine;
         case DIRECTION -> "Facing " + player.getDirection().getName();
         case CPS_COUNTER -> "CPS " + LEFT_CLICKS.size() + " | " + RIGHT_CLICKS.size();
         case COMBO_COUNTER -> "Combo " + comboCount;
@@ -259,6 +278,7 @@ public final class ZenClientMod implements ClientModInitializer {
         case CLEAN_CROSSHAIR -> "Clean Crosshair";
         case HIT_COLOR -> "Hit Color Pulse";
         case FULLBRIGHT -> "Fullbright";
+        case COMPASS -> null;
       };
 
       if (text != null && !text.isBlank()) modules.add(text);
