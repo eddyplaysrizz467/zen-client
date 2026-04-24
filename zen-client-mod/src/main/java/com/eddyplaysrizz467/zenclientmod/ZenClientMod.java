@@ -182,7 +182,7 @@ public final class ZenClientMod implements ClientModInitializer {
         top + HUD_BOX_HEIGHT,
         0x8C050505
       );
-      drawContext.drawString(client.font, Component.literal(text), x, top + 4, 0xFFFFFF, true);
+      drawContext.drawString(client.font, Component.literal(text), x, top + 4, 0xFFFFFFFF, true);
     }
 
     int hiddenCount = modules.size() - visible;
@@ -197,7 +197,7 @@ public final class ZenClientMod implements ClientModInitializer {
         overflowTop + HUD_BOX_HEIGHT,
         0x6A202020
       );
-      drawContext.drawString(client.font, Component.literal(overflow), x, overflowTop + 4, 0xD7D7D7, true);
+      drawContext.drawString(client.font, Component.literal(overflow), x, overflowTop + 4, 0xFFD7D7D7, true);
     }
   }
 
@@ -217,7 +217,7 @@ public final class ZenClientMod implements ClientModInitializer {
       y + HUD_BOX_HEIGHT,
       0x8C050505
     );
-    drawContext.drawString(client.font, Component.literal(text), x, y + 4, 0xFFFFFF, true);
+    drawContext.drawString(client.font, Component.literal(text), x, y + 4, 0xFFFFFFFF, true);
   }
 
   private void updateCompass(LocalPlayer player) {
