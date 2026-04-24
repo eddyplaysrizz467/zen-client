@@ -59,6 +59,7 @@ let modrinthMods = [];
 let modrinthPacks = [];
 let updateStatus = null;
 let skinRenderNonce = 0;
+const installedLibraryItems = new Set();
 
 function setBusy(nextBusy) {
   busy = nextBusy;
@@ -462,6 +463,12 @@ function formatDownloads(value) {
   return String(num);
 }
 
+function libraryInstallKey(item, projectType) {
+  const root = String(collectSettings().minecraftDirectory || "").trim().toLowerCase();
+  const id = String(item?.project_id || item?.slug || item?.title || "").trim().toLowerCase();
+  return `${projectType}:${root}:${id}`;
+}
+
 function libraryItemCard(item, projectType) {
   const row = document.createElement("div");
   row.className = "library-item";
@@ -492,10 +499,14 @@ function libraryItemCard(item, projectType) {
   });
 
   const installBtn = document.createElement("button");
-  installBtn.className = "primary";
+  const installKey = libraryInstallKey(item, projectType);
+  const installed = installedLibraryItems.has(installKey);
+  installBtn.className = installed ? "ghost" : "primary";
   installBtn.type = "button";
-  installBtn.textContent = "Install";
+  installBtn.textContent = installed ? "Installed" : "Install";
+  installBtn.disabled = installed;
   installBtn.addEventListener("click", async () => {
+    if (installedLibraryItems.has(installKey)) return;
     const settings = collectSettings();
     setBusy(true);
     statusText.textContent = `Installing ${item.title || item.slug}...`;
@@ -507,6 +518,10 @@ function libraryItemCard(item, projectType) {
         minecraftVersion: settings.minecraftVersion,
         launchType: settings.launchType
       });
+      installedLibraryItems.add(installKey);
+      installBtn.textContent = "Installed";
+      installBtn.disabled = true;
+      installBtn.className = "ghost";
       statusText.textContent = `Installed ${item.title || item.slug}.`;
     } catch (error) {
       statusText.textContent = `Problem: ${error.message}`;
