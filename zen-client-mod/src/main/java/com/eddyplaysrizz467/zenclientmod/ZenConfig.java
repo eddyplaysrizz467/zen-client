@@ -20,11 +20,20 @@ public final class ZenConfig {
   private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("zen-client.json");
   private static final double MIN_FLIGHT_SPEED = 0.4D;
   private static final double MAX_FLIGHT_SPEED = 3.0D;
+  private static final double MIN_AIM_ASSIST_RANGE = 2.0D;
+  private static final double MAX_AIM_ASSIST_RANGE = 8.0D;
+  private static final double MIN_AIM_ASSIST_SMOOTHNESS = 0.05D;
+  private static final double MAX_AIM_ASSIST_SMOOTHNESS = 0.45D;
+  private static final double MIN_AIM_ASSIST_BREAK = 0.5D;
+  private static final double MAX_AIM_ASSIST_BREAK = 8.0D;
 
   private final LinkedHashSet<String> enabledIds = new LinkedHashSet<>();
   private final LinkedHashSet<String> espTargetIds = new LinkedHashSet<>();
   private String flightModeId = ZenFlightMode.VANILLA.id();
   private double flightSpeed = 1.0D;
+  private double aimAssistRange = 4.5D;
+  private double aimAssistSmoothness = 0.18D;
+  private double aimAssistBreakSensitivity = 2.0D;
 
   public static ZenConfig load() {
     ZenConfig config = new ZenConfig();
@@ -50,6 +59,15 @@ public final class ZenConfig {
       if (root.has("flightSpeed")) {
         config.flightSpeed = clampFlightSpeed(root.get("flightSpeed").getAsDouble());
       }
+      if (root.has("aimAssistRange")) {
+        config.aimAssistRange = clampAimAssistRange(root.get("aimAssistRange").getAsDouble());
+      }
+      if (root.has("aimAssistSmoothness")) {
+        config.aimAssistSmoothness = clampAimAssistSmoothness(root.get("aimAssistSmoothness").getAsDouble());
+      }
+      if (root.has("aimAssistBreakSensitivity")) {
+        config.aimAssistBreakSensitivity = clampAimAssistBreak(root.get("aimAssistBreakSensitivity").getAsDouble());
+      }
     } catch (Exception ignored) {
       // Keep defaults if the file is unreadable.
     }
@@ -64,6 +82,9 @@ public final class ZenConfig {
       root.add("espTargets", GSON.toJsonTree(espTargetIds));
       root.addProperty("flightMode", flightModeId);
       root.addProperty("flightSpeed", flightSpeed);
+      root.addProperty("aimAssistRange", aimAssistRange);
+      root.addProperty("aimAssistSmoothness", aimAssistSmoothness);
+      root.addProperty("aimAssistBreakSensitivity", aimAssistBreakSensitivity);
       try (Writer writer = Files.newBufferedWriter(CONFIG_PATH, StandardCharsets.UTF_8)) {
         GSON.toJson(root, writer);
       }
@@ -134,7 +155,46 @@ public final class ZenConfig {
     save();
   }
 
+  public double aimAssistRange() {
+    return aimAssistRange;
+  }
+
+  public void adjustAimAssistRange(double delta) {
+    aimAssistRange = clampAimAssistRange(aimAssistRange + delta);
+    save();
+  }
+
+  public double aimAssistSmoothness() {
+    return aimAssistSmoothness;
+  }
+
+  public void adjustAimAssistSmoothness(double delta) {
+    aimAssistSmoothness = clampAimAssistSmoothness(aimAssistSmoothness + delta);
+    save();
+  }
+
+  public double aimAssistBreakSensitivity() {
+    return aimAssistBreakSensitivity;
+  }
+
+  public void adjustAimAssistBreakSensitivity(double delta) {
+    aimAssistBreakSensitivity = clampAimAssistBreak(aimAssistBreakSensitivity + delta);
+    save();
+  }
+
   private static double clampFlightSpeed(double value) {
     return Math.max(MIN_FLIGHT_SPEED, Math.min(MAX_FLIGHT_SPEED, value));
+  }
+
+  private static double clampAimAssistRange(double value) {
+    return Math.max(MIN_AIM_ASSIST_RANGE, Math.min(MAX_AIM_ASSIST_RANGE, value));
+  }
+
+  private static double clampAimAssistSmoothness(double value) {
+    return Math.max(MIN_AIM_ASSIST_SMOOTHNESS, Math.min(MAX_AIM_ASSIST_SMOOTHNESS, value));
+  }
+
+  private static double clampAimAssistBreak(double value) {
+    return Math.max(MIN_AIM_ASSIST_BREAK, Math.min(MAX_AIM_ASSIST_BREAK, value));
   }
 }

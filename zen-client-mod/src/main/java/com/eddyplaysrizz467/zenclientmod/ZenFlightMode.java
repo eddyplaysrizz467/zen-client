@@ -3,7 +3,14 @@ package com.eddyplaysrizz467.zenclientmod;
 public enum ZenFlightMode {
   VANILLA("vanilla", "Vanilla"),
   DRIFT("drift", "Drift"),
-  DASH("dash", "Dash");
+  DASH("dash", "Dash"),
+  GLIDE("glide", "Glide"),
+  HOVER("hover", "Hover"),
+  BOOST("boost", "Boost"),
+  CRUISE("cruise", "Cruise"),
+  JET("jet", "Jet"),
+  BRAKE("brake", "Brake"),
+  SWIFT("swift", "Swift");
 
   private final String id;
   private final String label;

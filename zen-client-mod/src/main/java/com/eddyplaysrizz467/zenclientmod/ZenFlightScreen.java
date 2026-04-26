@@ -79,7 +79,7 @@ public final class ZenFlightScreen extends Screen {
     super.render(context, mouseX, mouseY, delta);
 
     context.drawCenteredString(this.font, this.title, this.width / 2, 28, 0xFFFFFFFF);
-    context.drawCenteredString(this.font, Component.literal("Vanilla is steady, Drift floats, Dash pushes harder."), this.width / 2, 48, 0xFF9E9E9E);
+    context.drawCenteredString(this.font, Component.literal("10 flight modes: Vanilla, Drift, Dash, Glide, Hover, Boost, Cruise, Jet, Brake, Swift."), this.width / 2, 48, 0xFF9E9E9E);
     context.drawCenteredString(this.font, Component.literal("Speed range: 0.4x to 3.0x"), this.width / 2, 58, 0xFF7FC9FF);
   }
 

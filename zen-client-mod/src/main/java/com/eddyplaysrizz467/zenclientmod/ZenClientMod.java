@@ -3,6 +3,7 @@ package com.eddyplaysrizz467.zenclientmod;
 import com.mojang.blaze3d.platform.InputConstants;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
@@ -43,6 +44,9 @@ import org.lwjgl.glfw.GLFW;
 public final class ZenClientMod implements ClientModInitializer {
   private static final int MAX_VISIBLE_MODULES = 10;
   private static final long CLICK_WINDOW_MS = 1000L;
+  private static final long AIM_ASSIST_CANCEL_MS = 1000L;
+  private static final long AIM_ASSIST_TARGET_MS = 4500L;
+  private static final long DAMAGE_TRACK_MS = 2500L;
   private static final int FULLBRIGHT_NIGHT_VISION_DURATION = 1_000_000;
   private static final int HUD_BOX_PADDING = 4;
   private static final int HUD_BOX_HEIGHT = 18;
@@ -65,6 +69,13 @@ public final class ZenClientMod implements ClientModInitializer {
   private static long lastComboAt = 0L;
   private static double lastReach = 0.0D;
   private static float lastTargetHealth = -1.0F;
+  private static float lastDamageDealt = 0.0F;
+  private static int lastDamageTargetId = -1;
+  private static long lastDamageObservedAt = 0L;
+  private static float lastObservedYaw = 0.0F;
+  private static float lastObservedPitch = 0.0F;
+  private static float lastAimAssistYawApplied = 0.0F;
+  private static float lastAimAssistPitchApplied = 0.0F;
   private static float previousGamma = 1.0F;
   private static int previousFov = 70;
   private static int previousSimulationDistance = 12;
@@ -85,6 +96,9 @@ public final class ZenClientMod implements ClientModInitializer {
   private static boolean pureFpsApplied = false;
   private static boolean flightApplied = false;
   private static int hitPulseTicks = 0;
+  private static int aimAssistTargetId = -1;
+  private static long aimAssistTargetExpiresAt = 0L;
+  private static long aimAssistSuppressedUntil = 0L;
 
   public static ZenConfig config() {
     return CONFIG;
@@ -135,9 +149,12 @@ public final class ZenClientMod implements ClientModInitializer {
 
     LocalPlayer player = client.player;
     updateEstimatedServerTps(client);
+    updateDamageCounter(client);
     maintainFullbright(client, player);
     maintainClientOptions(client);
     maintainFlight(client, player);
+    maintainAimAssist(client, player);
+    maintainAntiFall(player);
     maintainEsp(client);
 
     if (CONFIG.isEnabled(ZenFeature.TOGGLE_SPRINT) || CONFIG.isEnabled(ZenFeature.SPRINT_ASSIST)) {
@@ -153,7 +170,14 @@ public final class ZenClientMod implements ClientModInitializer {
 
     lastReach = Math.sqrt(client.player.distanceToSqr(living));
     lastTargetHealth = living.getHealth();
+    lastDamageDealt = 0.0F;
+    lastDamageTargetId = living.getId();
+    lastDamageObservedAt = System.currentTimeMillis() + DAMAGE_TRACK_MS;
     hitPulseTicks = 10;
+    if (CONFIG.isEnabled(ZenFeature.AIM_ASSIST)) {
+      aimAssistTargetId = living.getId();
+      aimAssistTargetExpiresAt = System.currentTimeMillis() + AIM_ASSIST_TARGET_MS;
+    }
 
     long now = System.currentTimeMillis();
     if (now - lastComboAt <= 2000L) comboCount += 1;
@@ -169,6 +193,13 @@ public final class ZenClientMod implements ClientModInitializer {
     lastComboAt = 0L;
     lastReach = 0.0D;
     lastTargetHealth = -1.0F;
+    lastDamageDealt = 0.0F;
+    lastDamageTargetId = -1;
+    lastDamageObservedAt = 0L;
+    lastObservedYaw = 0.0F;
+    lastObservedPitch = 0.0F;
+    lastAimAssistYawApplied = 0.0F;
+    lastAimAssistPitchApplied = 0.0F;
     lastServerSampleAt = 0L;
     lastWorldGameTime = Long.MIN_VALUE;
     estimatedServerTps = 20.0D;
@@ -180,6 +211,9 @@ public final class ZenClientMod implements ClientModInitializer {
     noBobApplied = false;
     pureFpsApplied = false;
     flightApplied = false;
+    aimAssistTargetId = -1;
+    aimAssistTargetExpiresAt = 0L;
+    aimAssistSuppressedUntil = 0L;
     ESP_ENTITY_IDS.clear();
   }
 
@@ -200,6 +234,7 @@ public final class ZenClientMod implements ClientModInitializer {
 
     renderCenterEffects(client, drawContext);
     renderCompassHud(client, drawContext);
+    renderEspHud(client, drawContext);
 
     List<String> modules = buildModules(client);
     if (modules.isEmpty()) return;
@@ -293,14 +328,46 @@ public final class ZenClientMod implements ClientModInitializer {
 
     long elapsedMs = now - lastServerSampleAt;
     long worldDelta = worldGameTime - lastWorldGameTime;
-    if (elapsedMs < 250L || worldDelta <= 0L) return;
+    if (elapsedMs < 150L || worldDelta <= 0L) return;
 
     double sample = Mth.clamp((worldDelta * 1000.0D) / elapsedMs, 0.0D, 20.0D);
+    if (SERVER_TPS_SAMPLES.size() >= 40) SERVER_TPS_SAMPLES.removeFirst();
     SERVER_TPS_SAMPLES.addLast(sample);
-    while (SERVER_TPS_SAMPLES.size() > 20) SERVER_TPS_SAMPLES.removeFirst();
-    estimatedServerTps = SERVER_TPS_SAMPLES.stream().mapToDouble(Double::doubleValue).average().orElse(20.0D);
+
+    double weighted = 0.0D;
+    double weightTotal = 0.0D;
+    int index = 1;
+    for (double value : SERVER_TPS_SAMPLES) {
+      double weight = index++;
+      weighted += value * weight;
+      weightTotal += weight;
+    }
+    double smoothed = weightTotal <= 0.0D ? sample : (weighted / weightTotal);
+    estimatedServerTps = Mth.clamp((estimatedServerTps * 0.45D) + (smoothed * 0.55D), 0.0D, 20.0D);
     lastServerSampleAt = now;
     lastWorldGameTime = worldGameTime;
+  }
+
+  private void updateDamageCounter(Minecraft client) {
+    if (client.level == null || lastDamageTargetId < 0) return;
+    if (System.currentTimeMillis() > lastDamageObservedAt) {
+      lastDamageTargetId = -1;
+      return;
+    }
+
+    Entity entity = client.level.getEntity(lastDamageTargetId);
+    if (!(entity instanceof LivingEntity living) || !living.isAlive()) {
+      lastDamageTargetId = -1;
+      return;
+    }
+
+    float currentHealth = living.getHealth();
+    float damage = Math.max(0.0F, lastTargetHealth - currentHealth);
+    if (damage > 0.0F) {
+      lastDamageDealt = damage;
+      lastTargetHealth = currentHealth;
+      lastDamageObservedAt = System.currentTimeMillis() + DAMAGE_TRACK_MS;
+    }
   }
 
   private void maintainFullbright(Minecraft client, LocalPlayer player) {
@@ -423,48 +490,14 @@ public final class ZenClientMod implements ClientModInitializer {
     player.getAbilities().flying = true;
     player.getAbilities().setFlyingSpeed(0.05F * speed);
 
-    if (mode == ZenFlightMode.DRIFT) {
-      Vec3 movement = player.getDeltaMovement();
-      double driftDown = client.options.keyShift.isDown() ? -0.18D * speed : -0.03D;
-      player.setDeltaMovement(movement.x * 0.96D, Math.max(movement.y, driftDown), movement.z * 0.96D);
-    } else if (mode == ZenFlightMode.DASH) {
-      if (player.input != null && player.input.hasForwardImpulse()) {
-        Vec3 look = player.getLookAngle();
-        Vec3 flat = new Vec3(look.x, 0.0D, look.z);
-        if (flat.lengthSqr() > 0.0001D) {
-          Vec3 dash = flat.normalize().scale(0.055D * speed);
-          player.setDeltaMovement(player.getDeltaMovement().add(dash));
-        }
-      }
-    }
+    applyFlightMode(client, player, mode, speed);
 
     player.onUpdateAbilities();
   }
 
   private void maintainEsp(Minecraft client) {
-    if (client.level == null || client.player == null) return;
-
-    if (!CONFIG.isEnabled(ZenFeature.ESP)) {
-      clearEsp(client);
-      return;
-    }
-
-    Set<Integer> nextIds = new HashSet<>();
-    for (Entity entity : client.level.entitiesForRendering()) {
-      if (entity == client.player) continue;
-      if (!matchesEspTarget(entity)) continue;
-      entity.setGlowingTag(true);
-      nextIds.add(entity.getId());
-    }
-
-    for (Integer id : ESP_ENTITY_IDS) {
-      if (nextIds.contains(id)) continue;
-      Entity entity = client.level.getEntity(id);
-      if (entity != null) entity.setGlowingTag(false);
-    }
-
-    ESP_ENTITY_IDS.clear();
-    ESP_ENTITY_IDS.addAll(nextIds);
+    if (client.level == null || client.player == null || CONFIG.isEnabled(ZenFeature.ESP)) return;
+    clearEsp(client);
   }
 
   private void clearEsp(Minecraft client) {
@@ -518,13 +551,124 @@ public final class ZenClientMod implements ClientModInitializer {
     }
   }
 
+  private void renderEspHud(Minecraft client, GuiGraphics drawContext) {
+    if (!CONFIG.isEnabled(ZenFeature.ESP) || client.level == null || client.player == null) return;
+
+    List<Entity> targets = new ArrayList<>();
+    for (Entity entity : client.level.entitiesForRendering()) {
+      if (entity == client.player) continue;
+      if (!matchesEspTarget(entity)) continue;
+      if (client.player.distanceToSqr(entity) > 14400.0D) continue;
+      targets.add(entity);
+    }
+
+    targets.sort(Comparator.comparingDouble(client.player::distanceToSqr));
+    int limit = Math.min(12, targets.size());
+    int centerX = client.getWindow().getGuiScaledWidth() / 2;
+    int centerY = client.getWindow().getGuiScaledHeight() / 2;
+    double fov = Math.max(40.0D, client.options.fov().get());
+
+    for (int i = 0; i < limit; i++) {
+      Entity entity = targets.get(i);
+      Vec3 toEntity = entity.getBoundingBox().getCenter().subtract(client.player.getEyePosition());
+      double horizontal = Math.sqrt((toEntity.x * toEntity.x) + (toEntity.z * toEntity.z));
+      float targetYaw = (float) (Mth.atan2(toEntity.z, toEntity.x) * (180.0D / Math.PI)) - 90.0F;
+      float targetPitch = (float) (-(Mth.atan2(toEntity.y, horizontal) * (180.0D / Math.PI)));
+      float yawDelta = Mth.wrapDegrees(targetYaw - client.player.getYRot());
+      float pitchDelta = Mth.wrapDegrees(targetPitch - client.player.getXRot());
+
+      int x = centerX + Math.round((float) (yawDelta / fov) * (centerX - 50));
+      int y = centerY + Math.round((float) (pitchDelta / (fov * 0.65D)) * (centerY - 50));
+      x = Mth.clamp(x, 18, client.getWindow().getGuiScaledWidth() - 18);
+      y = Mth.clamp(y, 18, client.getWindow().getGuiScaledHeight() - 32);
+
+      int color = espColorFor(entity);
+      String text = entity.getName().getString() + " " + Math.round(Math.sqrt(client.player.distanceToSqr(entity))) + "m";
+      int width = client.font.width(text);
+      drawContext.fill(x - 12, y - 12, x + 12, y + 12, 0x50101010);
+      drawContext.fill(x - 12, y - 12, x + 12, y - 10, color);
+      drawContext.fill(x - 12, y + 10, x + 12, y + 12, color);
+      drawContext.fill(x - 12, y - 12, x - 10, y + 12, color);
+      drawContext.fill(x + 10, y - 12, x + 12, y + 12, color);
+      drawContext.drawString(client.font, Component.literal(text), x - (width / 2), y - 24, color, true);
+    }
+  }
+
+  private int espColorFor(Entity entity) {
+    if (entity instanceof Player) return 0xFF7FDBFF;
+    if (entity instanceof Enemy) return 0xFFFF6B6B;
+    if (entity instanceof Animal) return 0xFF7CFFB2;
+    if (entity instanceof ItemEntity) return 0xFFFFE082;
+    return 0xFFD4D4D4;
+  }
+
+  private void maintainAimAssist(Minecraft client, LocalPlayer player) {
+    float currentYaw = player.getYRot();
+    float currentPitch = player.getXRot();
+
+    if (CONFIG.isEnabled(ZenFeature.AIM_ASSIST)) {
+      float actualYawChange = Mth.wrapDegrees(currentYaw - lastObservedYaw);
+      float actualPitchChange = currentPitch - lastObservedPitch;
+      float manualYaw = Math.abs(actualYawChange - lastAimAssistYawApplied);
+      float manualPitch = Math.abs(actualPitchChange - lastAimAssistPitchApplied);
+      double breakThreshold = CONFIG.aimAssistBreakSensitivity();
+      if (manualYaw > breakThreshold || manualPitch > breakThreshold) {
+        aimAssistSuppressedUntil = System.currentTimeMillis() + AIM_ASSIST_CANCEL_MS;
+      }
+
+      Entity target = client.level != null ? client.level.getEntity(aimAssistTargetId) : null;
+      if (target instanceof LivingEntity living
+        && living.isAlive()
+        && System.currentTimeMillis() <= aimAssistTargetExpiresAt
+        && System.currentTimeMillis() > aimAssistSuppressedUntil
+        && player.distanceToSqr(living) <= (CONFIG.aimAssistRange() * CONFIG.aimAssistRange())) {
+        Vec3 targetPoint = living.getBoundingBox().getCenter().add(0.0D, living.getBbHeight() * 0.25D, 0.0D);
+        Vec3 toTarget = targetPoint.subtract(player.getEyePosition());
+        double horizontal = Math.sqrt((toTarget.x * toTarget.x) + (toTarget.z * toTarget.z));
+        float targetYaw = (float) (Mth.atan2(toTarget.z, toTarget.x) * (180.0D / Math.PI)) - 90.0F;
+        float targetPitch = (float) (-(Mth.atan2(toTarget.y, horizontal) * (180.0D / Math.PI)));
+        float yawDelta = Mth.wrapDegrees(targetYaw - currentYaw);
+        float pitchDelta = Mth.wrapDegrees(targetPitch - currentPitch);
+        float smoothing = (float) CONFIG.aimAssistSmoothness();
+        lastAimAssistYawApplied = yawDelta * smoothing;
+        lastAimAssistPitchApplied = pitchDelta * smoothing;
+
+        player.setYRot(currentYaw + lastAimAssistYawApplied);
+        player.setXRot(currentPitch + lastAimAssistPitchApplied);
+        player.setYHeadRot(player.getYRot());
+      } else {
+        lastAimAssistYawApplied = 0.0F;
+        lastAimAssistPitchApplied = 0.0F;
+      }
+    } else {
+      aimAssistTargetId = -1;
+      aimAssistTargetExpiresAt = 0L;
+      aimAssistSuppressedUntil = 0L;
+      lastAimAssistYawApplied = 0.0F;
+      lastAimAssistPitchApplied = 0.0F;
+    }
+
+    lastObservedYaw = player.getYRot();
+    lastObservedPitch = player.getXRot();
+  }
+
+  private void maintainAntiFall(LocalPlayer player) {
+    if (!CONFIG.isEnabled(ZenFeature.ANTI_FALL)) return;
+    if (player.fallDistance > 2.0F) {
+      player.resetFallDistance();
+      if (player.getDeltaMovement().y < -0.7D) {
+        player.setDeltaMovement(player.getDeltaMovement().x, -0.35D, player.getDeltaMovement().z);
+      }
+    }
+  }
+
   private List<String> buildModules(Minecraft client) {
     LocalPlayer player = client.player;
     List<String> modules = new ArrayList<>();
 
     for (ZenFeature feature : CONFIG.orderedEnabledFeatures()) {
       String text = switch (feature) {
-        case TPS_COUNTER -> format("TPS %.1f", estimatedServerTps);
+        case TPS_COUNTER -> buildTpsStatus();
         case FPS_COUNTER -> "FPS " + Minecraft.getInstance().getFps();
         case PING_COUNTER -> buildPing(client);
         case COORDINATES -> format("XYZ %.1f %.1f %.1f", player.getX(), player.getY(), player.getZ());
@@ -545,7 +689,7 @@ public final class ZenClientMod implements ClientModInitializer {
         case ARROW_COUNT -> "Arrows " + countItem(player, Items.ARROW);
         case ARMOR_STATUS -> buildArmorStatus(player);
         case POTION_STATUS -> "Effects " + player.getActiveEffects().size();
-        case TARGET_HEALTH -> lastTargetHealth >= 0.0F ? format("Target %.1f", lastTargetHealth) : "Target --";
+        case TARGET_HEALTH -> buildDamageStatus();
         case ESP -> buildEspStatus();
         case TOGGLE_SPRINT -> "Toggle Sprint";
         case SPRINT_ASSIST -> "Sprint Assist";
@@ -553,6 +697,8 @@ public final class ZenClientMod implements ClientModInitializer {
         case NO_BOB -> "No Bob";
         case FOV_LOCK -> "FOV Lock";
         case FLIGHT -> buildFlightStatus();
+        case AIM_ASSIST -> buildAimAssistStatus();
+        case ANTI_FALL -> "Anti Fall";
         case PURE_FPS -> "Pure FPS";
         case CLEAN_CROSSHAIR -> "Clean Crosshair";
         case HIT_COLOR -> "Hit Color Pulse";
@@ -568,6 +714,21 @@ public final class ZenClientMod implements ClientModInitializer {
 
   private String buildFlightStatus() {
     return format("Flight %s %.1fx", CONFIG.flightMode().label(), CONFIG.flightSpeed());
+  }
+
+  private String buildAimAssistStatus() {
+    return format("Aim %.1fm %.2f", CONFIG.aimAssistRange(), CONFIG.aimAssistSmoothness());
+  }
+
+  private String buildTpsStatus() {
+    String quality = estimatedServerTps >= 19.2D ? "Stable" : (estimatedServerTps >= 17.5D ? "OK" : "Low");
+    return format("TPS %.2f %s", estimatedServerTps, quality);
+  }
+
+  private String buildDamageStatus() {
+    if (lastTargetHealth < 0.0F && lastDamageDealt <= 0.0F) return "Damage --";
+    if (lastDamageDealt > 0.0F) return format("Damage %.1f HP", lastDamageDealt);
+    return format("Target %.1f HP", lastTargetHealth);
   }
 
   private String buildPing(Minecraft client) {
@@ -744,5 +905,58 @@ public final class ZenClientMod implements ClientModInitializer {
     }
 
     lastCtrlPDown = comboDown;
+  }
+
+  private void applyFlightMode(Minecraft client, LocalPlayer player, ZenFlightMode mode, float speed) {
+    Vec3 movement = player.getDeltaMovement();
+    boolean forward = player.input != null && player.input.hasForwardImpulse();
+    Vec3 look = player.getLookAngle();
+    Vec3 flat = new Vec3(look.x, 0.0D, look.z);
+    Vec3 forwardBoost = flat.lengthSqr() > 0.0001D ? flat.normalize().scale(0.04D * speed) : Vec3.ZERO;
+
+    switch (mode) {
+      case VANILLA -> {
+      }
+      case DRIFT -> {
+        double driftDown = client.options.keyShift.isDown() ? -0.18D * speed : -0.03D;
+        player.setDeltaMovement(movement.x * 0.96D, Math.max(movement.y, driftDown), movement.z * 0.96D);
+      }
+      case DASH -> {
+        if (forward) player.setDeltaMovement(movement.add(forwardBoost.scale(1.35D)));
+      }
+      case GLIDE -> {
+        double glideY = client.options.keyShift.isDown() ? -0.08D : -0.02D;
+        player.setDeltaMovement(movement.x, Math.max(movement.y, glideY), movement.z);
+      }
+      case HOVER -> {
+        double vertical = 0.0D;
+        if (client.options.keyJump.isDown()) vertical = 0.22D * speed;
+        if (client.options.keyShift.isDown()) vertical = -0.22D * speed;
+        player.setDeltaMovement(movement.x * 0.9D, vertical, movement.z * 0.9D);
+      }
+      case BOOST -> {
+        if (forward) player.setDeltaMovement(movement.add(forwardBoost.scale(2.25D)));
+        player.getAbilities().setFlyingSpeed(0.065F * speed);
+      }
+      case CRUISE -> {
+        if (forward) player.setDeltaMovement(movement.add(forwardBoost.scale(0.95D)));
+        else player.setDeltaMovement(movement.x * 0.98D, movement.y, movement.z * 0.98D);
+      }
+      case JET -> {
+        double vertical = movement.y;
+        if (client.options.keyJump.isDown()) vertical = 0.28D * speed;
+        if (client.options.keyShift.isDown()) vertical = -0.28D * speed;
+        Vec3 jet = forward ? movement.add(forwardBoost.scale(1.1D)) : movement;
+        player.setDeltaMovement(jet.x, vertical, jet.z);
+      }
+      case BRAKE -> {
+        player.setDeltaMovement(movement.x * 0.78D, movement.y * 0.65D, movement.z * 0.78D);
+        player.getAbilities().setFlyingSpeed(0.035F * speed);
+      }
+      case SWIFT -> {
+        if (forward) player.setDeltaMovement(movement.add(forwardBoost.scale(1.65D)));
+        player.getAbilities().setFlyingSpeed(0.08F * speed);
+      }
+    }
   }
 }

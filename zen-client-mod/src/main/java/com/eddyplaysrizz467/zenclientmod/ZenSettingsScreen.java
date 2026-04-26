@@ -60,7 +60,7 @@ public final class ZenSettingsScreen extends Screen {
       int row = i / 2;
       int x = column == 0 ? leftX : rightX;
       int y = CONTENT_START_Y + (row * ROW_HEIGHT);
-      int mainWidth = (feature == ZenFeature.ESP || feature == ZenFeature.FLIGHT) ? COLUMN_WIDTH - 72 : COLUMN_WIDTH;
+      int mainWidth = (feature == ZenFeature.ESP || feature == ZenFeature.FLIGHT || feature == ZenFeature.AIM_ASSIST) ? COLUMN_WIDTH - 72 : COLUMN_WIDTH;
       entries.add(new Entry(feature, x, y, COLUMN_WIDTH, mainWidth));
     }
 
@@ -82,11 +82,16 @@ public final class ZenSettingsScreen extends Screen {
         }).bounds(entry.x, y, entry.mainWidth, BUTTON_HEIGHT).build()
       );
 
-      if (entry.feature == ZenFeature.ESP || entry.feature == ZenFeature.FLIGHT) {
+      if (entry.feature == ZenFeature.ESP || entry.feature == ZenFeature.FLIGHT || entry.feature == ZenFeature.AIM_ASSIST) {
         String configLabel = entry.feature == ZenFeature.ESP ? "Targets" : "Tune";
         entry.auxButton = addRenderableWidget(
           Button.builder(Component.literal(configLabel), button -> this.minecraft.setScreen(
-            entry.feature == ZenFeature.ESP ? new ZenEspScreen(this) : new ZenFlightScreen(this)
+            switch (entry.feature) {
+              case ESP -> new ZenEspScreen(this);
+              case FLIGHT -> new ZenFlightScreen(this);
+              case AIM_ASSIST -> new ZenAimAssistScreen(this);
+              default -> this;
+            }
           ))
             .bounds(entry.x + entry.mainWidth + 8, y, 64, BUTTON_HEIGHT)
             .build()
@@ -148,6 +153,7 @@ public final class ZenSettingsScreen extends Screen {
       String description = switch (entry.feature) {
         case ESP -> entry.feature.description() + " Use Targets to choose what glows.";
         case FLIGHT -> entry.feature.description() + " Use Tune to adjust mode and speed.";
+        case AIM_ASSIST -> entry.feature.description() + " Use Tune to adjust range and smoothness.";
         default -> entry.feature.description();
       };
       context.drawString(this.font, Component.literal(description), entry.x + 2, descY, descColor, false);

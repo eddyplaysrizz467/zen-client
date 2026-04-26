@@ -31,6 +31,8 @@ public enum ZenFeature {
   NO_BOB("no_bob", "No Bob", "Disables view bobbing while enabled."),
   FOV_LOCK("fov_lock", "FOV Lock", "Keeps your field of view steady at 70."),
   FLIGHT("flight", "Flight", "Lets you fly with configurable mode and speed. Right-click to tune it."),
+  AIM_ASSIST("aim_assist", "Aim Assist", "Smoothly follows the last thing you hit until you move your mouse away."),
+  ANTI_FALL("anti_fall", "Anti Fall", "Tries to stop fall damage before you hit the ground."),
   PURE_FPS("pure_fps", "Pure FPS", "Forces aggressive client performance settings while enabled."),
   CLEAN_CROSSHAIR("clean_crosshair", "Clean Crosshair", "Adds a simple crosshair module tag."),
   HIT_COLOR("hit_color", "Hit Color Pulse", "Adds a hit-feedback module tag."),
