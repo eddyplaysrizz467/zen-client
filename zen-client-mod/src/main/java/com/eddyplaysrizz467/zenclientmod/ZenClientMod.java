@@ -21,6 +21,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.util.Mth;
@@ -43,10 +44,10 @@ import net.minecraft.world.phys.Vec3;
 import org.lwjgl.glfw.GLFW;
 
 public final class ZenClientMod implements ClientModInitializer {
-  private static final int MAX_VISIBLE_MODULES = 10;
+  private static final int MAX_VISIBLE_MODULES = 15;
   private static final long CLICK_WINDOW_MS = 1000L;
-  private static final long AIM_ASSIST_CANCEL_MS = 1000L;
-  private static final long AIM_ASSIST_TARGET_MS = 4500L;
+  private static final long AIM_ASSIST_CANCEL_MS = 650L;
+  private static final long AIM_ASSIST_TARGET_MS = 7000L;
   private static final long DAMAGE_TRACK_MS = 2500L;
   private static final int FULLBRIGHT_NIGHT_VISION_DURATION = 1_000_000;
   private static final int HUD_BOX_PADDING = 4;
@@ -63,6 +64,7 @@ public final class ZenClientMod implements ClientModInitializer {
   private static boolean lastAttackDown = false;
   private static boolean lastUseDown = false;
   private static boolean lastCtrlPDown = false;
+  private static boolean lastJumpDown = false;
   private static long lastServerSampleAt = 0L;
   private static long lastWorldGameTime = Long.MIN_VALUE;
   private static double estimatedServerTps = 20.0D;
@@ -100,6 +102,20 @@ public final class ZenClientMod implements ClientModInitializer {
   private static int aimAssistTargetId = -1;
   private static long aimAssistTargetExpiresAt = 0L;
   private static long aimAssistSuppressedUntil = 0L;
+
+  private static final class ProjectedPoint {
+    private final int x;
+    private final int y;
+    private final boolean clamped;
+    private final boolean behind;
+
+    private ProjectedPoint(int x, int y, boolean clamped, boolean behind) {
+      this.x = x;
+      this.y = y;
+      this.clamped = clamped;
+      this.behind = behind;
+    }
+  }
 
   public static ZenConfig config() {
     return CONFIG;
@@ -153,6 +169,7 @@ public final class ZenClientMod implements ClientModInitializer {
     updateDamageCounter(client);
     maintainFullbright(client, player);
     maintainClientOptions(client);
+    maintainMeteorMovementModules(client, player);
     maintainFlight(client, player);
     maintainAimAssist(client, player);
     maintainAntiFall(player);
@@ -216,6 +233,7 @@ public final class ZenClientMod implements ClientModInitializer {
     aimAssistTargetExpiresAt = 0L;
     aimAssistSuppressedUntil = 0L;
     ESP_ENTITY_IDS.clear();
+    lastJumpDown = false;
   }
 
   public static List<String> activeModuleLines(Minecraft client) {
@@ -427,16 +445,9 @@ public final class ZenClientMod implements ClientModInitializer {
       noBobApplied = false;
     }
 
-    if (CONFIG.isEnabled(ZenFeature.FOV_LOCK)) {
-      if (!fovLockApplied) {
-        previousFov = client.options.fov().get();
-        fovLockApplied = true;
-      }
-      client.options.fov().set(70);
-    } else if (fovLockApplied) {
-      client.options.fov().set(previousFov);
-      fovLockApplied = false;
-    }
+    Integer targetFov = null;
+    if (CONFIG.isEnabled(ZenFeature.ZOOM)) targetFov = 30;
+    else if (CONFIG.isEnabled(ZenFeature.FOV_LOCK)) targetFov = 70;
 
     if (CONFIG.isEnabled(ZenFeature.PURE_FPS)) {
       if (!pureFpsApplied) {
@@ -454,7 +465,7 @@ public final class ZenClientMod implements ClientModInitializer {
       client.options.ambientOcclusion().set(false);
       client.options.enableVsync().set(false);
       client.options.bobView().set(false);
-      client.options.fov().set(70);
+      if (targetFov == null) targetFov = 70;
     } else if (pureFpsApplied) {
       client.options.simulationDistance().set(previousSimulationDistance);
       client.options.entityDistanceScaling().set(previousEntityDistanceScaling);
@@ -463,6 +474,80 @@ public final class ZenClientMod implements ClientModInitializer {
       client.options.enableVsync().set(previousVsync);
       pureFpsApplied = false;
     }
+
+    if (targetFov != null) {
+      if (!fovLockApplied) {
+        previousFov = client.options.fov().get();
+        fovLockApplied = true;
+      }
+      client.options.fov().set(targetFov);
+    } else if (fovLockApplied) {
+      client.options.fov().set(previousFov);
+      fovLockApplied = false;
+    }
+  }
+
+  private void maintainMeteorMovementModules(Minecraft client, LocalPlayer player) {
+    boolean jumpDown = client.options.keyJump.isDown();
+    boolean jumpPressed = jumpDown && !lastJumpDown;
+    Vec3 movement = player.getDeltaMovement();
+    boolean movingForward = player.input != null && player.input.hasForwardImpulse();
+
+    if (CONFIG.isEnabled(ZenFeature.SPEED_BOOST)
+      && player.onGround()
+      && movingForward
+      && movement.horizontalDistanceSqr() > 0.0025D) {
+      player.setDeltaMovement(movement.x * 1.035D, movement.y, movement.z * 1.035D);
+      movement = player.getDeltaMovement();
+    }
+
+    if (CONFIG.isEnabled(ZenFeature.NO_SLOW)
+      && player.isUsingItem()
+      && movement.horizontalDistanceSqr() > 0.0004D) {
+      player.setDeltaMovement(movement.x * 1.06D, movement.y, movement.z * 1.06D);
+      movement = player.getDeltaMovement();
+    }
+
+    if (CONFIG.isEnabled(ZenFeature.AUTO_WALK) && client.screen == null) {
+      Vec3 look = player.getLookAngle();
+      Vec3 flat = new Vec3(look.x, 0.0D, look.z);
+      if (flat.lengthSqr() > 0.0001D) {
+        double push = player.onGround() ? 0.038D : 0.018D;
+        player.setDeltaMovement(player.getDeltaMovement().add(flat.normalize().scale(push)));
+      }
+    }
+
+    if (CONFIG.isEnabled(ZenFeature.SPIDER)
+      && player.horizontalCollision
+      && movingForward
+      && !player.onGround()) {
+      player.setDeltaMovement(player.getDeltaMovement().x, Math.max(player.getDeltaMovement().y, 0.22D), player.getDeltaMovement().z);
+    }
+
+    if (CONFIG.isEnabled(ZenFeature.AIR_JUMP)
+      && jumpPressed
+      && !player.onGround()
+      && !player.onClimbable()
+      && !player.isInWater()) {
+      player.setDeltaMovement(player.getDeltaMovement().x, 0.42D, player.getDeltaMovement().z);
+      player.resetFallDistance();
+    }
+
+    if (CONFIG.isEnabled(ZenFeature.PARKOUR)
+      && player.onGround()
+      && movingForward
+      && !hasSupportAhead(player, 0.42D)) {
+      player.jumpFromGround();
+    }
+
+    if (CONFIG.isEnabled(ZenFeature.SAFE_WALK)
+      && player.onGround()
+      && movement.horizontalDistanceSqr() > 0.001D
+      && !hasSupportAhead(player, 0.28D)) {
+      player.setDeltaMovement(0.0D, movement.y, 0.0D);
+    }
+
+    lastJumpDown = jumpDown;
   }
 
   private void maintainFlight(Minecraft client, LocalPlayer player) {
@@ -553,7 +638,9 @@ public final class ZenClientMod implements ClientModInitializer {
   }
 
   private void renderEspHud(Minecraft client, GuiGraphics drawContext) {
-    if (!CONFIG.isEnabled(ZenFeature.ESP) || client.level == null || client.player == null) return;
+    if ((!CONFIG.isEnabled(ZenFeature.ESP) && !CONFIG.isEnabled(ZenFeature.TRACERS) && !CONFIG.isEnabled(ZenFeature.NAME_TAGS))
+      || client.level == null
+      || client.player == null) return;
 
     List<Entity> targets = new ArrayList<>();
     for (Entity entity : client.level.entitiesForRendering()) {
@@ -571,27 +658,44 @@ public final class ZenClientMod implements ClientModInitializer {
 
     for (int i = 0; i < limit; i++) {
       Entity entity = targets.get(i);
-      Vec3 toEntity = entity.getBoundingBox().getCenter().subtract(client.player.getEyePosition());
-      double horizontal = Math.sqrt((toEntity.x * toEntity.x) + (toEntity.z * toEntity.z));
-      float targetYaw = (float) (Mth.atan2(toEntity.z, toEntity.x) * (180.0D / Math.PI)) - 90.0F;
-      float targetPitch = (float) (-(Mth.atan2(toEntity.y, horizontal) * (180.0D / Math.PI)));
-      float yawDelta = Mth.wrapDegrees(targetYaw - client.player.getYRot());
-      float pitchDelta = Mth.wrapDegrees(targetPitch - client.player.getXRot());
-
-      int x = centerX + Math.round((float) (yawDelta / fov) * (centerX - 50));
-      int y = centerY + Math.round((float) (pitchDelta / (fov * 0.65D)) * (centerY - 50));
-      x = Mth.clamp(x, 18, client.getWindow().getGuiScaledWidth() - 18);
-      y = Mth.clamp(y, 18, client.getWindow().getGuiScaledHeight() - 32);
-
+      Vec3 anchor = entity.getBoundingBox().getCenter().add(0.0D, entity.getBbHeight() * 0.25D, 0.0D);
+      ProjectedPoint projected = projectToHud(client, anchor, fov);
+      int x = projected.x;
+      int y = projected.y;
       int color = espColorFor(entity);
-      String text = entity.getName().getString() + " " + Math.round(Math.sqrt(client.player.distanceToSqr(entity))) + "m";
+      int distance = Math.round((float) Math.sqrt(client.player.distanceToSqr(entity)));
+      String text = entity.getName().getString() + " " + distance + "m";
       int width = client.font.width(text);
-      drawContext.fill(x - 12, y - 12, x + 12, y + 12, 0x50101010);
-      drawContext.fill(x - 12, y - 12, x + 12, y - 10, color);
-      drawContext.fill(x - 12, y + 10, x + 12, y + 12, color);
-      drawContext.fill(x - 12, y - 12, x - 10, y + 12, color);
-      drawContext.fill(x + 10, y - 12, x + 12, y + 12, color);
-      drawContext.drawString(client.font, Component.literal(text), x - (width / 2), y - 24, color, true);
+
+      if (CONFIG.isEnabled(ZenFeature.TRACERS)) {
+        drawTracerLine(drawContext, centerX, centerY + 18, x, y, (color & 0x00FFFFFF) | 0x8C000000);
+      }
+
+      if (CONFIG.isEnabled(ZenFeature.ESP)) {
+        int halfWidth = projected.behind ? 10 : 14;
+        int halfHeight = projected.behind ? 10 : 14;
+        drawContext.fill(x - halfWidth, y - halfHeight, x + halfWidth, y + halfHeight, 0x50101010);
+        drawContext.fill(x - halfWidth, y - halfHeight, x + halfWidth, y - halfHeight + 2, color);
+        drawContext.fill(x - halfWidth, y + halfHeight - 2, x + halfWidth, y + halfHeight, color);
+        drawContext.fill(x - halfWidth, y - halfHeight, x - halfWidth + 2, y + halfHeight, color);
+        drawContext.fill(x + halfWidth - 2, y - halfHeight, x + halfWidth, y + halfHeight, color);
+        if (projected.behind || projected.clamped) {
+          drawContext.drawCenteredString(client.font, Component.literal("<"), x - 10, y - 4, color);
+          drawContext.drawCenteredString(client.font, Component.literal(">"), x + 10, y - 4, color);
+        }
+      }
+
+      if (CONFIG.isEnabled(ZenFeature.NAME_TAGS)) {
+        String label = text;
+        if (entity instanceof LivingEntity living) {
+          label += format(" %.1f HP", living.getHealth());
+        }
+        int labelWidth = client.font.width(label);
+        drawContext.fill(x - (labelWidth / 2) - 4, y - 28, x + (labelWidth / 2) + 4, y - 16, 0x7A050505);
+        drawContext.drawString(client.font, Component.literal(label), x - (labelWidth / 2), y - 25, 0xFFFFFFFF, true);
+      } else if (CONFIG.isEnabled(ZenFeature.ESP)) {
+        drawContext.drawString(client.font, Component.literal(text), x - (width / 2), y - 24, color, true);
+      }
     }
   }
 
@@ -601,6 +705,61 @@ public final class ZenClientMod implements ClientModInitializer {
     if (entity instanceof Animal) return 0xFF7CFFB2;
     if (entity instanceof ItemEntity) return 0xFFFFE082;
     return 0xFFD4D4D4;
+  }
+
+  private ProjectedPoint projectToHud(Minecraft client, Vec3 worldPos, double fovDegrees) {
+    Vec3 cameraPos = client.player.getEyePosition();
+    Vec3 relative = worldPos.subtract(cameraPos);
+
+    double yaw = Math.toRadians(client.player.getYRot());
+    double pitch = Math.toRadians(client.player.getXRot());
+    double cosYaw = Math.cos(-yaw);
+    double sinYaw = Math.sin(-yaw);
+    double x1 = (relative.x * cosYaw) - (relative.z * sinYaw);
+    double z1 = (relative.x * sinYaw) + (relative.z * cosYaw);
+
+    double cosPitch = Math.cos(-pitch);
+    double sinPitch = Math.sin(-pitch);
+    double y2 = (relative.y * cosPitch) - (z1 * sinPitch);
+    double z2 = (relative.y * sinPitch) + (z1 * cosPitch);
+
+    int width = client.getWindow().getGuiScaledWidth();
+    int height = client.getWindow().getGuiScaledHeight();
+    int centerX = width / 2;
+    int centerY = height / 2;
+    int edgeX = 18;
+    int edgeY = 18;
+    double aspect = Math.max(1.0D, width / (double) height);
+    double tan = Math.tan(Math.toRadians(fovDegrees) / 2.0D);
+    boolean behind = z2 <= 0.05D;
+
+    double ndcX;
+    double ndcY;
+    if (behind) {
+      ndcX = x1 >= 0.0D ? 1.15D : -1.15D;
+      ndcY = Mth.clamp(-y2 / 8.0D, -0.85D, 0.85D);
+    } else {
+      ndcX = (x1 / (z2 * tan)) / aspect;
+      ndcY = -(y2 / (z2 * tan));
+    }
+
+    int rawX = centerX + (int) Math.round(ndcX * centerX);
+    int rawY = centerY + (int) Math.round(ndcY * centerY);
+    int clampedX = Mth.clamp(rawX, edgeX, width - edgeX);
+    int clampedY = Mth.clamp(rawY, edgeY, height - edgeY - 24);
+    boolean clamped = behind || clampedX != rawX || clampedY != rawY;
+    return new ProjectedPoint(clampedX, clampedY, clamped, behind);
+  }
+
+  private void drawTracerLine(GuiGraphics drawContext, int startX, int startY, int endX, int endY, int color) {
+    int steps = Math.max(Math.abs(endX - startX), Math.abs(endY - startY));
+    if (steps <= 0) return;
+    for (int i = 0; i <= steps; i += 4) {
+      float t = i / (float) steps;
+      int x = Math.round(Mth.lerp(t, startX, endX));
+      int y = Math.round(Mth.lerp(t, startY, endY));
+      drawContext.fill(x, y, x + 2, y + 2, color);
+    }
   }
 
   private void maintainAimAssist(Minecraft client, LocalPlayer player) {
@@ -613,26 +772,24 @@ public final class ZenClientMod implements ClientModInitializer {
       float manualYaw = Math.abs(actualYawChange - lastAimAssistYawApplied);
       float manualPitch = Math.abs(actualPitchChange - lastAimAssistPitchApplied);
       double breakThreshold = CONFIG.aimAssistBreakSensitivity();
-      if (manualYaw > breakThreshold || manualPitch > breakThreshold) {
+      if ((manualYaw > breakThreshold * 1.35D || manualPitch > breakThreshold * 1.35D) && (manualYaw > 0.15F || manualPitch > 0.15F)) {
         aimAssistSuppressedUntil = System.currentTimeMillis() + AIM_ASSIST_CANCEL_MS;
       }
 
-      Entity target = client.level != null ? client.level.getEntity(aimAssistTargetId) : null;
-      if (target instanceof LivingEntity living
-        && living.isAlive()
-        && System.currentTimeMillis() <= aimAssistTargetExpiresAt
-        && System.currentTimeMillis() > aimAssistSuppressedUntil
-        && player.distanceToSqr(living) <= (CONFIG.aimAssistRange() * CONFIG.aimAssistRange())) {
-        Vec3 targetPoint = living.getBoundingBox().getCenter().add(0.0D, living.getBbHeight() * 0.25D, 0.0D);
+      LivingEntity target = resolveAimAssistTarget(client, player);
+      if (target != null && System.currentTimeMillis() > aimAssistSuppressedUntil) {
+        Vec3 targetPoint = target.getBoundingBox().getCenter().add(0.0D, target.getBbHeight() * 0.25D, 0.0D);
         Vec3 toTarget = targetPoint.subtract(player.getEyePosition());
         double horizontal = Math.sqrt((toTarget.x * toTarget.x) + (toTarget.z * toTarget.z));
         float targetYaw = (float) (Mth.atan2(toTarget.z, toTarget.x) * (180.0D / Math.PI)) - 90.0F;
         float targetPitch = (float) (-(Mth.atan2(toTarget.y, horizontal) * (180.0D / Math.PI)));
         float yawDelta = Mth.wrapDegrees(targetYaw - currentYaw);
         float pitchDelta = Mth.wrapDegrees(targetPitch - currentPitch);
-        float smoothing = (float) CONFIG.aimAssistSmoothness();
-        lastAimAssistYawApplied = yawDelta * smoothing;
-        lastAimAssistPitchApplied = pitchDelta * smoothing;
+        float smoothing = (float) Mth.clamp(CONFIG.aimAssistSmoothness() * 1.15D, 0.08D, 0.65D);
+        float maxYawStep = 9.0F;
+        float maxPitchStep = 7.0F;
+        lastAimAssistYawApplied = Mth.clamp(yawDelta * smoothing, -maxYawStep, maxYawStep);
+        lastAimAssistPitchApplied = Mth.clamp(pitchDelta * smoothing, -maxPitchStep, maxPitchStep);
 
         player.setYRot(currentYaw + lastAimAssistYawApplied);
         player.setXRot(currentPitch + lastAimAssistPitchApplied);
@@ -653,16 +810,69 @@ public final class ZenClientMod implements ClientModInitializer {
     lastObservedPitch = player.getXRot();
   }
 
+  private LivingEntity resolveAimAssistTarget(Minecraft client, LocalPlayer player) {
+    if (client.level == null) return null;
+
+    LivingEntity remembered = null;
+    Entity existing = client.level.getEntity(aimAssistTargetId);
+    if (existing instanceof LivingEntity living
+      && living.isAlive()
+      && System.currentTimeMillis() <= aimAssistTargetExpiresAt
+      && player.distanceToSqr(living) <= (CONFIG.aimAssistRange() * CONFIG.aimAssistRange())) {
+      remembered = living;
+    }
+
+    LivingEntity best = remembered;
+    double bestScore = remembered != null ? aimAssistScore(player, remembered) - 2.0D : Double.MAX_VALUE;
+
+    for (Entity entity : client.level.entitiesForRendering()) {
+      if (!(entity instanceof LivingEntity living)) continue;
+      if (living == player || !living.isAlive()) continue;
+      if (living instanceof Animal) continue;
+      double maxRange = CONFIG.aimAssistRange();
+      if (player.distanceToSqr(living) > maxRange * maxRange) continue;
+      double score = aimAssistScore(player, living);
+      if (score < bestScore) {
+        best = living;
+        bestScore = score;
+      }
+    }
+
+    if (best != null) {
+      aimAssistTargetId = best.getId();
+      aimAssistTargetExpiresAt = System.currentTimeMillis() + AIM_ASSIST_TARGET_MS;
+    }
+    return best;
+  }
+
+  private double aimAssistScore(LocalPlayer player, LivingEntity target) {
+    Vec3 targetPoint = target.getBoundingBox().getCenter().add(0.0D, target.getBbHeight() * 0.25D, 0.0D);
+    Vec3 toTarget = targetPoint.subtract(player.getEyePosition());
+    double horizontal = Math.sqrt((toTarget.x * toTarget.x) + (toTarget.z * toTarget.z));
+    float targetYaw = (float) (Mth.atan2(toTarget.z, toTarget.x) * (180.0D / Math.PI)) - 90.0F;
+    float targetPitch = (float) (-(Mth.atan2(toTarget.y, horizontal) * (180.0D / Math.PI)));
+    double yawDelta = Math.abs(Mth.wrapDegrees(targetYaw - player.getYRot()));
+    double pitchDelta = Math.abs(Mth.wrapDegrees(targetPitch - player.getXRot()));
+    double distance = Math.sqrt(player.distanceToSqr(target));
+    return (yawDelta * 1.7D) + (pitchDelta * 0.9D) + (distance * 1.25D);
+  }
+
   private void maintainAntiFall(LocalPlayer player) {
     if (!CONFIG.isEnabled(ZenFeature.ANTI_FALL)) return;
-    if (player.fallDistance > 2.0F) {
-      if (player.connection != null) {
-        player.connection.send(new ServerboundMovePlayerPacket.StatusOnly(true, player.horizontalCollision));
-      }
-      player.resetFallDistance();
-      if (player.getDeltaMovement().y < -0.7D) {
-        player.setDeltaMovement(player.getDeltaMovement().x, -0.35D, player.getDeltaMovement().z);
-      }
+
+    boolean normalFall = player.fallDistance > 2.0F;
+    boolean flightDescent = CONFIG.isEnabled(ZenFeature.FLIGHT) && player.getDeltaMovement().y < -0.12D;
+    if (!normalFall && !flightDescent) return;
+
+    if (player.connection != null) {
+      player.connection.send(new ServerboundMovePlayerPacket.StatusOnly(true, player.horizontalCollision));
+    }
+    player.resetFallDistance();
+
+    if (player.getDeltaMovement().y < -0.7D) {
+      player.setDeltaMovement(player.getDeltaMovement().x, -0.35D, player.getDeltaMovement().z);
+    } else if (flightDescent && player.getDeltaMovement().y < -0.12D) {
+      player.setDeltaMovement(player.getDeltaMovement().x, -0.08D, player.getDeltaMovement().z);
     }
   }
 
@@ -697,6 +907,13 @@ public final class ZenClientMod implements ClientModInitializer {
         case ESP -> buildEspStatus();
         case TOGGLE_SPRINT -> "Toggle Sprint";
         case SPRINT_ASSIST -> "Sprint Assist";
+        case SPEED_BOOST -> "Speed Boost";
+        case AIR_JUMP -> "Air Jump";
+        case SAFE_WALK -> "Safe Walk";
+        case AUTO_WALK -> "Auto Walk";
+        case NO_SLOW -> "No Slow";
+        case SPIDER -> "Spider";
+        case PARKOUR -> "Parkour";
         case AUTO_JUMP -> "Auto Jump";
         case NO_BOB -> "No Bob";
         case FOV_LOCK -> "FOV Lock";
@@ -704,6 +921,9 @@ public final class ZenClientMod implements ClientModInitializer {
         case AIM_ASSIST -> buildAimAssistStatus();
         case ANTI_FALL -> "Anti Fall";
         case PURE_FPS -> "Pure FPS";
+        case TRACERS -> "Tracers";
+        case NAME_TAGS -> "Name Tags";
+        case ZOOM -> "Zoom";
         case CLEAN_CROSSHAIR -> "Clean Crosshair";
         case HIT_COLOR -> "Hit Color Pulse";
         case FULLBRIGHT -> "Fullbright";
@@ -773,6 +993,15 @@ public final class ZenClientMod implements ClientModInitializer {
     double dx = player.getX() - player.xo;
     double dz = player.getZ() - player.zo;
     return Math.sqrt((dx * dx) + (dz * dz)) * 20.0D;
+  }
+
+  private boolean hasSupportAhead(LocalPlayer player, double distance) {
+    Vec3 look = player.getLookAngle();
+    Vec3 flat = new Vec3(look.x, 0.0D, look.z);
+    if (flat.lengthSqr() < 0.0001D) return true;
+    Vec3 ahead = flat.normalize().scale(distance);
+    BlockPos support = BlockPos.containing(player.getX() + ahead.x, player.getY() - 0.6D, player.getZ() + ahead.z);
+    return !player.level().getBlockState(support).isAir();
   }
 
   private String buildHeldDurability(Player player) {

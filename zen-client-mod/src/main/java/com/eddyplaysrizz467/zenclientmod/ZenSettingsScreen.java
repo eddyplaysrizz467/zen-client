@@ -128,9 +128,24 @@ public final class ZenSettingsScreen extends Screen {
     int panelRight = (this.width / 2) + 250;
     int panelTop = PANEL_TOP;
     int panelBottom = this.height - PANEL_BOTTOM_MARGIN;
-    context.fill(panelLeft, panelTop, panelRight, panelBottom, 0xCC090909);
-    context.fill(panelLeft, panelTop, panelRight, panelTop + 34, 0xE1121212);
-    context.fill(panelLeft + 18, panelTop + 44, panelRight - 18, panelTop + 45, 0x332E2E2E);
+    context.fill(panelLeft - 1, panelTop - 1, panelRight + 1, panelBottom + 1, 0xAA2C2C2C);
+    context.fill(panelLeft, panelTop, panelRight, panelBottom, 0xD0080808);
+    context.fill(panelLeft, panelTop, panelRight, panelTop + 38, 0xF0121216);
+    context.fill(panelLeft + 18, panelTop + 48, panelRight - 18, panelTop + 49, 0x443D3D46);
+
+    for (Entry entry : entries) {
+      int y = entry.baseY - scrollOffset;
+      int descY = y + BUTTON_HEIGHT + 2;
+      int contentTop = PANEL_TOP + 34 + PANEL_PADDING;
+      int contentBottom = this.height - PANEL_BOTTOM_MARGIN - PANEL_PADDING;
+      if (descY + this.font.lineHeight < contentTop || descY > contentBottom) continue;
+      int rowLeft = entry.x - 4;
+      int rowRight = entry.x + entry.width + 4;
+      int rowTop = y - 4;
+      int rowBottom = y + ROW_HEIGHT - 4;
+      int rowColor = ZenClientMod.config().isEnabled(entry.feature) ? 0x3029A36A : 0x24202024;
+      context.fill(rowLeft, rowTop, rowRight, rowBottom, rowColor);
+    }
 
     super.render(context, mouseX, mouseY, delta);
 
@@ -139,8 +154,8 @@ public final class ZenSettingsScreen extends Screen {
       this.font,
       Component.literal(ZenFeature.values().length + " live PvP/QoL modules for Zen Client"),
       this.width / 2,
-      46,
-      0xFF9E9E9E
+      48,
+      0xFFB5B5BD
     );
 
     for (Entry entry : entries) {
@@ -160,16 +175,16 @@ public final class ZenSettingsScreen extends Screen {
     }
 
     if (maxScroll() > 0) {
-      int trackTop = PANEL_TOP + 52;
+      int trackTop = PANEL_TOP + 56;
       int trackBottom = this.height - PANEL_BOTTOM_MARGIN - 18;
-      int trackX = panelRight - 10;
-      context.fill(trackX, trackTop, trackX + 4, trackBottom, 0x55303030);
+      int trackX = panelRight - 11;
+      context.fill(trackX, trackTop, trackX + 5, trackBottom, 0x55303036);
 
       int trackHeight = Math.max(20, trackBottom - trackTop);
       int thumbHeight = Math.max(28, (int) (trackHeight * visibleFraction()));
       int thumbTravel = Math.max(0, trackHeight - thumbHeight);
       int thumbY = trackTop + (int) Math.round((scrollOffset / (double) maxScroll()) * thumbTravel);
-      context.fill(trackX, thumbY, trackX + 4, thumbY + thumbHeight, 0xFFBDBDBD);
+      context.fill(trackX, thumbY, trackX + 5, thumbY + thumbHeight, 0xFFD7D7E2);
     }
   }
 
