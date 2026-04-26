@@ -27,10 +27,15 @@ const discordShowPlaying = document.getElementById("discordShowPlaying");
 const installMenuPackButton = document.getElementById("installMenuPackButton");
 
 const skinPreviewBox = document.getElementById("skinPreviewBox");
+const skinPreviewMeta = document.getElementById("skinPreviewMeta");
 const refreshSkinButton = document.getElementById("refreshSkinButton");
+const updateNotice = document.getElementById("updateNotice");
+const updateNoticeText = document.getElementById("updateNoticeText");
+const updateNoticeButton = document.getElementById("updateNoticeButton");
 
 const refreshModsButton = document.getElementById("refreshModsButton");
 const refreshPacksButton = document.getElementById("refreshPacksButton");
+const openModsFolderButton = document.getElementById("openModsFolderButton");
 const modsSearch = document.getElementById("modsSearch");
 const packsSearch = document.getElementById("packsSearch");
 const modsList = document.getElementById("modsList");
@@ -52,6 +57,9 @@ let busy = false;
 let libraryBusy = false;
 let modrinthMods = [];
 let modrinthPacks = [];
+let updateStatus = null;
+let skinRenderNonce = 0;
+const installedLibraryItems = new Set();
 
 function setBusy(nextBusy) {
   busy = nextBusy;
@@ -169,20 +177,94 @@ function skinHeadUrl(account) {
   return "";
 }
 
-function renderSkinHead() {
-  const selected = getSelectedAccount();
-  if (!selected) {
-    skinPreviewBox.innerHTML = `<div class="empty-state">Select an account to load skin info.</div>`;
+function headPreviewCandidates(account, profile) {
+  const username = String(profile?.name || account?.username || "").trim();
+  const rawUuid = String(profile?.id || account?.uuid || "").trim();
+  const cleanUuid = rawUuid.replace(/-/g, "");
+  const stamp = Date.now();
+  const urls = [];
+
+  if (cleanUuid) {
+    urls.push(`https://crafatar.com/avatars/${encodeURIComponent(cleanUuid)}?size=128&overlay&cb=${stamp}`);
+    urls.push(`https://mc-heads.net/avatar/${encodeURIComponent(cleanUuid)}/128`);
+  }
+  if (username) {
+    urls.push(`https://minotar.net/helm/${encodeURIComponent(username)}/128.png?cb=${stamp}`);
+    urls.push(`https://mc-heads.net/avatar/${encodeURIComponent(username)}/128`);
+  }
+  return urls;
+}
+
+async function loadFirstWorkingImage(urls) {
+  for (const url of urls) {
+    try {
+      await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.referrerPolicy = "no-referrer";
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = url;
+      });
+      return url;
+    } catch {
+      // Keep trying fallbacks.
+    }
+  }
+  return "";
+}
+
+function renderUpdateNotice() {
+  if (!updateStatus?.visible || !updateStatus?.message) {
+    updateNotice.hidden = true;
+    updateNoticeButton.hidden = true;
+    updateNoticeText.textContent = "";
     return;
   }
 
-  const url = skinHeadUrl(selected);
+  updateNotice.hidden = false;
+  updateNoticeText.textContent = updateStatus.message;
+  updateNoticeButton.disabled = false;
+
+  if (updateStatus.action === "download" || updateStatus.action === "install") {
+    updateNoticeButton.hidden = false;
+    updateNoticeButton.textContent = "Yes";
+  } else {
+    updateNoticeButton.hidden = true;
+  }
+}
+
+async function renderSkinHead() {
+  const nonce = ++skinRenderNonce;
+  const selected = getSelectedAccount();
+  if (!selected) {
+    skinPreviewBox.innerHTML = `<div class="empty-state">Select an account to load skin info.</div>`;
+    skinPreviewMeta.textContent = "";
+    return;
+  }
+
+  skinPreviewBox.innerHTML = `<div class="empty-state">Loading skin preview...</div>`;
+  skinPreviewMeta.textContent = selected.type === "microsoft" ? "Checking your current skin..." : selected.username;
+
+  let profile = null;
+  if (selected.type === "microsoft") {
+    try {
+      profile = await window.aeroApi.getSkinProfile();
+    } catch {
+      profile = null;
+    }
+  }
+
+  const url = await loadFirstWorkingImage(headPreviewCandidates(selected, profile));
+  if (nonce !== skinRenderNonce) return;
+
   if (!url) {
     skinPreviewBox.innerHTML = `<div class="empty-state">No skin info available for this account.</div>`;
+    skinPreviewMeta.textContent = selected.username || "";
     return;
   }
 
   skinPreviewBox.innerHTML = `<img alt="Minecraft skin head preview" referrerpolicy="no-referrer" src="${url}" />`;
+  skinPreviewMeta.textContent = String(profile?.name || selected.username || "").trim();
 }
 
 function normalizeBackgroundPreset(presetValue) {
@@ -203,10 +285,18 @@ function appendLog(message) {
   logBox.scrollTop = logBox.scrollHeight;
 
   const line = String(message || "").toLowerCase();
-  if (line.includes("joining server") || line.includes("connecting to")) {
+  if (line.includes("joining server")) {
+    statusText.textContent = "Enjoy!";
+  } else if (
+    line.includes("loading world") ||
+    line.includes("joining world") ||
+    line.includes("starting integrated server") ||
+    line.includes("preparing spawn area") ||
+    line.includes("connecting to")
+  ) {
     statusText.textContent = "Loading peace...";
-  } else if (line.includes("loading terrain")) {
-    statusText.textContent = "Have fun!";
+  } else if (line.includes("generating terrain") || line.includes("loading terrain")) {
+    statusText.textContent = "Giving you peace...";
   }
 }
 
@@ -214,12 +304,14 @@ function appendLog(message) {
 
 function syncFromState(nextState) {
   state = nextState;
+  updateStatus = nextState.updateStatus || updateStatus;
   applyBackgroundPreset(state?.settings?.backgroundPreset);
   logBox.textContent = "";
   (state.log || []).forEach((line) => appendLog(line));
   renderAccounts();
   renderSettings();
   renderHero();
+  renderUpdateNotice();
 }
 
 function collectSettings() {
@@ -354,6 +446,21 @@ installMenuPackButton.addEventListener("click", async () => {
 });
 
 refreshSkinButton.addEventListener("click", () => renderSkinHead());
+updateNoticeButton.addEventListener("click", async () => {
+  if (!updateStatus?.action) return;
+  updateNoticeButton.disabled = true;
+  try {
+    if (updateStatus.action === "download") {
+      await window.aeroApi.startUpdateDownload();
+    } else if (updateStatus.action === "install") {
+      await window.aeroApi.installUpdateNow();
+    }
+  } catch (error) {
+    statusText.textContent = `Problem: ${error.message}`;
+  } finally {
+    updateNoticeButton.disabled = false;
+  }
+});
 
 function formatDownloads(value) {
   const num = Number(value || 0);
@@ -362,6 +469,12 @@ function formatDownloads(value) {
   if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}m`;
   if (num >= 1_000) return `${(num / 1_000).toFixed(1)}k`;
   return String(num);
+}
+
+function libraryInstallKey(item, projectType) {
+  const root = String(collectSettings().minecraftDirectory || "").trim().toLowerCase();
+  const id = String(item?.project_id || item?.slug || item?.title || "").trim().toLowerCase();
+  return `${projectType}:${root}:${id}`;
 }
 
 function libraryItemCard(item, projectType) {
@@ -394,10 +507,14 @@ function libraryItemCard(item, projectType) {
   });
 
   const installBtn = document.createElement("button");
-  installBtn.className = "primary";
+  const installKey = libraryInstallKey(item, projectType);
+  const installed = installedLibraryItems.has(installKey);
+  installBtn.className = installed ? "ghost" : "primary";
   installBtn.type = "button";
-  installBtn.textContent = "Install";
+  installBtn.textContent = installed ? "Installed" : "Install";
+  installBtn.disabled = installed;
   installBtn.addEventListener("click", async () => {
+    if (installedLibraryItems.has(installKey)) return;
     const settings = collectSettings();
     setBusy(true);
     statusText.textContent = `Installing ${item.title || item.slug}...`;
@@ -409,6 +526,10 @@ function libraryItemCard(item, projectType) {
         minecraftVersion: settings.minecraftVersion,
         launchType: settings.launchType
       });
+      installedLibraryItems.add(installKey);
+      installBtn.textContent = "Installed";
+      installBtn.disabled = true;
+      installBtn.className = "ghost";
       statusText.textContent = `Installed ${item.title || item.slug}.`;
     } catch (error) {
       statusText.textContent = `Problem: ${error.message}`;
@@ -491,6 +612,19 @@ refreshModsButton.addEventListener("click", () => {
   ensureLibraryLoaded().catch(() => {});
 });
 
+openModsFolderButton.addEventListener("click", async () => {
+  const settings = collectSettings();
+  try {
+    const result = await window.aeroApi.openFolder({
+      minecraftDirectory: settings.minecraftDirectory,
+      kind: "mods"
+    });
+    statusText.textContent = `Opened mods folder: ${result.path}`;
+  } catch (error) {
+    statusText.textContent = `Problem: ${error.message}`;
+  }
+});
+
 refreshPacksButton.addEventListener("click", () => {
   modrinthPacks = [];
   ensureLibraryLoaded().catch(() => {});
@@ -523,6 +657,11 @@ window.aeroApi.onStateUpdated((nextState) => {
   const stored = localStorage.getItem("aeroTab");
   if (stored === "skins") renderSkinHead();
   if (stored === "library") ensureLibraryLoaded().catch(() => {});
+});
+
+window.aeroApi.onUpdateStatus((nextStatus) => {
+  updateStatus = nextStatus;
+  renderUpdateNotice();
 });
 
 window.aeroApi.onProgress((payload) => {

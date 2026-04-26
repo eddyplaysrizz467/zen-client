@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, nativeImage, Menu, shell, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, nativeImage, Menu, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -15,6 +15,10 @@ const LEGACY_STATE_FILE = path.join(app.getPath("appData"), "AeroClient", "launc
 const DEFAULT_ROOT = path.join(app.getPath("appData"), ".minecraft");
 const INSTALLER_DIR = path.join(APP_DIR, "installers");
 const DEFAULT_DISCORD_APP_ID = "1496668054803714058";
+const ZEN_CLIENT_MOD_FILENAME = "zen-client-fabric.jar";
+const ZEN_CLIENT_REQUIRED_MODS = [
+  { slug: "fabric-api", label: "Fabric API" }
+];
 
 let mainWindow = null;
 let launchClient = null;
@@ -24,9 +28,28 @@ let discordConnecting = false;
 let currentSession = null;
 let logBuffer = [];
 let updatePollTimer = null;
+let currentUpdateState = {
+  stage: "idle",
+  version: "",
+  message: "",
+  progressPercent: null,
+  action: null,
+  visible: false
+};
+let autoUpdaterRef = null;
 
 function ensureDir(target) {
   fs.mkdirSync(target, { recursive: true });
+}
+
+function pickNewestFile(paths) {
+  const candidates = paths
+    .filter(Boolean)
+    .filter((item) => fs.existsSync(item))
+    .map((item) => ({ path: item, stat: fs.statSync(item) }));
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
+  return candidates[0].path;
 }
 
 function defaultState() {
@@ -96,6 +119,14 @@ function appendLog(message) {
   sendEvent("launcher-log", { message });
 }
 
+function setUpdateState(patch) {
+  currentUpdateState = {
+    ...currentUpdateState,
+    ...patch
+  };
+  sendEvent("update-status", currentUpdateState);
+}
+
 function sendEvent(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, payload);
@@ -103,13 +134,13 @@ function sendEvent(channel, payload) {
 }
 
 function zenIconDataUrl() {
-  // Simple black/white concentric-circle logo (matches the launcher UI badge).
+  // Concentric circle icon used across launcher branding.
   const svg = `
   <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-    <rect width="64" height="64" rx="12" fill="#0a0a0a"/>
-    <circle cx="32" cy="32" r="24" fill="none" stroke="#f5f5f5" stroke-width="6"/>
-    <circle cx="32" cy="32" r="13" fill="none" stroke="#f5f5f5" stroke-width="6"/>
-    <circle cx="32" cy="32" r="5" fill="#f5f5f5"/>
+    <rect width="64" height="64" fill="#0a0a0a"/>
+    <circle cx="32" cy="32" r="22" fill="none" stroke="#f4f4f4" stroke-width="7"/>
+    <circle cx="32" cy="32" r="10" fill="none" stroke="#f4f4f4" stroke-width="7"/>
+    <circle cx="32" cy="32" r="4.5" fill="#f4f4f4"/>
   </svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
@@ -146,10 +177,10 @@ function createWindow() {
   }
 
   mainWindow = new BrowserWindow({
-    width: 1300,
-    height: 860,
-    minWidth: 1100,
-    minHeight: 720,
+    width: 1240,
+    height: 840,
+    minWidth: 980,
+    minHeight: 700,
     backgroundColor: "#050505",
     title: APP_NAME,
     icon,
@@ -182,100 +213,85 @@ function initAutoUpdater() {
   // Auto-updater only makes sense for packaged installer builds.
   if (!app.isPackaged) return;
 
-  let autoUpdater = null;
   try {
-    ({ autoUpdater } = require("electron-updater"));
+    ({ autoUpdater: autoUpdaterRef } = require("electron-updater"));
   } catch (error) {
     appendLog(`[update] Auto-updater unavailable: ${error?.message || String(error)}`);
     return;
   }
 
-  autoUpdater.autoDownload = false;
-  autoUpdater.logger = null;
-
-  let updatePromptOpen = false;
+  autoUpdaterRef.autoDownload = false;
+  autoUpdaterRef.logger = null;
   let updateDownloadStarted = false;
-  let updateReadyPromptShown = false;
 
-  async function promptToDownloadUpdate(version) {
-    if (updatePromptOpen || updateDownloadStarted) return;
-    updatePromptOpen = true;
-    try {
-      const result = await dialog.showMessageBox(mainWindow, {
-        type: "info",
-        buttons: ["Yes"],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true,
-        title: "Update available",
-        message: `Zen Client ${version || "update"} is available.`,
-        detail: "Would you like to update now?"
-      });
-      if (result.response === 0) {
-        updateDownloadStarted = true;
-        appendLog("[update] Starting update download...");
-        await autoUpdater.downloadUpdate();
-      }
-    } catch (error) {
-      appendLog(`[update] Could not start update: ${error?.message || String(error)}`);
-      updateDownloadStarted = false;
-    } finally {
-      updatePromptOpen = false;
-    }
-  }
-
-  async function promptToInstallUpdate(version) {
-    if (updateReadyPromptShown) return;
-    updateReadyPromptShown = true;
-    try {
-      const result = await dialog.showMessageBox(mainWindow, {
-        type: "info",
-        buttons: ["Yes"],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true,
-        title: "Update ready",
-        message: `Zen Client ${version || "update"} is ready to install.`,
-        detail: "Would you like to update now?"
-      });
-      if (result.response === 0) {
-        appendLog("[update] Installing update now...");
-        autoUpdater.quitAndInstall();
-      }
-    } catch (error) {
-      appendLog(`[update] Could not install update: ${error?.message || String(error)}`);
-      updateReadyPromptShown = false;
-    }
-  }
-
-  autoUpdater.on("checking-for-update", () => appendLog("[update] Checking for updates..."));
-  autoUpdater.on("update-available", (info) => {
-    appendLog(`[update] Update available: ${info?.version || "new version"}`);
-    promptToDownloadUpdate(info?.version).catch(() => {});
+  autoUpdaterRef.on("checking-for-update", () => {
+    setUpdateState({
+      stage: "checking",
+      visible: false,
+      action: null,
+      message: "",
+      progressPercent: null
+    });
   });
-  autoUpdater.on("update-not-available", () => appendLog("[update] No updates available."));
-  autoUpdater.on("error", (err) => {
-    appendLog(`[update] Error: ${err?.message || String(err)}`);
+  autoUpdaterRef.on("update-available", (info) => {
+    setUpdateState({
+      stage: "available",
+      version: info?.version || "",
+      visible: true,
+      action: "download",
+      message: `Zen Client ${info?.version || "update"} is available.`,
+      progressPercent: null
+    });
+  });
+  autoUpdaterRef.on("update-not-available", () => {
+    setUpdateState({
+      stage: "idle",
+      visible: false,
+      action: null,
+      message: "",
+      progressPercent: null
+    });
+  });
+  autoUpdaterRef.on("error", (err) => {
     updateDownloadStarted = false;
+    setUpdateState({
+      stage: "error",
+      visible: true,
+      action: null,
+      message: `Update problem: ${err?.message || String(err)}`,
+      progressPercent: null
+    });
   });
-  autoUpdater.on("download-progress", (p) => {
+  autoUpdaterRef.on("download-progress", (p) => {
     const pct = typeof p?.percent === "number" ? p.percent.toFixed(0) : "?";
-    appendLog(`[update] Downloading... ${pct}%`);
+    setUpdateState({
+      stage: "downloading",
+      visible: true,
+      action: null,
+      message: `Downloading update... ${pct}%`,
+      progressPercent: Number.isFinite(Number(p?.percent)) ? Math.round(Number(p.percent)) : null
+    });
   });
-  autoUpdater.on("update-downloaded", (info) => {
-    appendLog("[update] Update downloaded.");
-    promptToInstallUpdate(info?.version).catch(() => {});
+  autoUpdaterRef.on("update-downloaded", (info) => {
+    setUpdateState({
+      stage: "downloaded",
+      version: info?.version || "",
+      visible: true,
+      action: "install",
+      message: `Zen Client ${info?.version || "update"} is ready to install.`,
+      progressPercent: 100
+    });
   });
 
   // Kick off once shortly after the window exists.
   setTimeout(() => {
-    autoUpdater.checkForUpdates().catch(() => {});
+    autoUpdaterRef.checkForUpdates().catch(() => {});
   }, 2500);
 
   if (updatePollTimer) clearInterval(updatePollTimer);
   updatePollTimer = setInterval(() => {
-    autoUpdater.checkForUpdates().catch(() => {});
-  }, 10_000);
+    autoUpdaterRef.checkForUpdates().catch(() => {});
+  }, 5_000);
 }
 
 function sanitizeAccount(account) {
@@ -295,11 +311,12 @@ function getDiscordActivity(state) {
   const base = { startTimestamp: Math.floor(now / 1000) };
 
   if (currentSession && settings.discordShowPlaying) {
-    const details = `Zen Client - ${currentSession.launchType || "Vanilla"}`;
-    let stateLine = `Playing ${currentSession.version || ""}`.trim();
-    if (currentSession.phase === "loading_peace") stateLine = "Loading peace...";
-    if (currentSession.phase === "have_fun") stateLine = "Have fun!";
-    return {
+      const details = `Zen Client - ${currentSession.launchType || "Vanilla"}`;
+      let stateLine = `Playing ${currentSession.version || ""}`.trim();
+      if (currentSession.phase === "loading_peace") stateLine = "Loading peace...";
+      if (currentSession.phase === "giving_peace") stateLine = "Giving you peace...";
+      if (currentSession.phase === "enjoy") stateLine = "Enjoy!";
+      return {
       ...base,
       details,
       state: stateLine || "In game",
@@ -324,8 +341,19 @@ function updateSessionPhaseFromLog(line) {
   if (!currentSession) return;
   const text = String(line || "").toLowerCase();
   let next = null;
-  if (text.includes("joining server") || text.includes("connecting to")) next = "loading_peace";
-  if (text.includes("loading terrain")) next = "have_fun";
+  if (text.includes("joining server")) {
+    next = "enjoy";
+  } else if (
+    text.includes("loading world") ||
+    text.includes("joining world") ||
+    text.includes("starting integrated server") ||
+    text.includes("preparing spawn area") ||
+    text.includes("connecting to")
+  ) {
+    next = "loading_peace";
+  } else if (text.includes("generating terrain") || text.includes("loading terrain")) {
+    next = "giving_peace";
+  }
   if (next && currentSession.phase !== next) {
     currentSession.phase = next;
     setDiscordPresence();
@@ -389,7 +417,8 @@ function getClientState() {
     accounts: state.accounts.map(sanitizeAccount),
     selectedAccountId: state.selectedAccountId,
     settings: state.settings,
-    log: logBuffer
+    log: logBuffer,
+    updateStatus: currentUpdateState
   };
 }
 
@@ -609,6 +638,57 @@ async function ensureFile(url, targetPath) {
   return targetPath;
 }
 
+function getVersionInstallInfo(minecraftRoot, versionId) {
+  const versionDir = path.join(minecraftRoot, "versions", versionId);
+  const jsonPath = path.join(versionDir, `${versionId}.json`);
+  const jarPath = path.join(versionDir, `${versionId}.jar`);
+  const jsonExists = fs.existsSync(jsonPath);
+  const jarExists = fs.existsSync(jarPath);
+  const jarSize = jarExists ? fs.statSync(jarPath).size : 0;
+  return {
+    versionDir,
+    jsonPath,
+    jarPath,
+    jsonExists,
+    jarExists,
+    jarSize,
+    isValid: jsonExists && jarExists && jarSize > 0
+  };
+}
+
+function repairInheritedVersionJar(minecraftRoot, versionId) {
+  const info = getVersionInstallInfo(minecraftRoot, versionId);
+  if (!info.jsonExists) return false;
+  if (info.jarExists && info.jarSize > 0) return true;
+
+  try {
+    const versionJson = JSON.parse(fs.readFileSync(info.jsonPath, "utf8"));
+    const inheritedVersion = String(versionJson.inheritsFrom || "").trim();
+    if (!inheritedVersion) return false;
+
+    const inheritedJarPath = path.join(minecraftRoot, "versions", inheritedVersion, `${inheritedVersion}.jar`);
+    if (!fs.existsSync(inheritedJarPath)) return false;
+
+    const inheritedJarSize = fs.statSync(inheritedJarPath).size;
+    if (inheritedJarSize <= 0) return false;
+
+    ensureDir(path.dirname(info.jarPath));
+    fs.copyFileSync(inheritedJarPath, info.jarPath);
+    appendLog(`[launch] Repaired ${versionId} by copying inherited jar from ${inheritedVersion}.`);
+    return true;
+  } catch (error) {
+    appendLog(`[launch] Could not repair ${versionId}: ${error?.message || String(error)}`);
+    return false;
+  }
+}
+
+function removeBrokenVersionInstall(minecraftRoot, versionId, label) {
+  const info = getVersionInstallInfo(minecraftRoot, versionId);
+  if (!fs.existsSync(info.versionDir)) return;
+  appendLog(`[${label}] Found broken install for ${versionId}; repairing it now.`);
+  fs.rmSync(info.versionDir, { recursive: true, force: true });
+}
+
 function spawnLogged(command, args, label) {
   return new Promise((resolve, reject) => {
     appendLog(`[${label}] ${command} ${args.join(" ")}`);
@@ -653,8 +733,12 @@ async function ensureFabricInstall(minecraftRoot, javaPath, minecraftVersion) {
   const loaderVersion = await getLatestFabricLoader(minecraftVersion);
   if (!loaderVersion) throw new Error("Could not find a Fabric loader for that version.");
   const versionId = `fabric-loader-${loaderVersion}-${minecraftVersion}`;
-  const versionFile = path.join(minecraftRoot, "versions", versionId, `${versionId}.json`);
-  if (fs.existsSync(versionFile)) return versionId;
+  const installInfo = getVersionInstallInfo(minecraftRoot, versionId);
+  if (installInfo.isValid) return versionId;
+  if (repairInheritedVersionJar(minecraftRoot, versionId)) return versionId;
+  if (installInfo.jsonExists || installInfo.jarExists) {
+    removeBrokenVersionInstall(minecraftRoot, versionId, "fabric");
+  }
 
   const installers = await fetchJson("https://meta.fabricmc.net/v2/versions/installer");
   const installer = installers.find((item) => item.stable) || installers[0];
@@ -682,8 +766,12 @@ async function ensureQuiltInstall(minecraftRoot, javaPath, minecraftVersion) {
   const loaderVersion = await getLatestQuiltLoader(minecraftVersion);
   if (!loaderVersion) throw new Error("Could not find a Quilt loader for that version.");
   const versionId = `quilt-loader-${loaderVersion}-${minecraftVersion}`;
-  const versionFile = path.join(minecraftRoot, "versions", versionId, `${versionId}.json`);
-  if (fs.existsSync(versionFile)) return versionId;
+  let installInfo = getVersionInstallInfo(minecraftRoot, versionId);
+  if (installInfo.isValid) return versionId;
+  if (repairInheritedVersionJar(minecraftRoot, versionId)) return versionId;
+  if (installInfo.jsonExists || installInfo.jarExists) {
+    removeBrokenVersionInstall(minecraftRoot, versionId, "quilt");
+  }
 
   const installers = await fetchJson("https://meta.quiltmc.org/v3/versions/installer");
   const installer = installers[0];
@@ -715,7 +803,11 @@ async function ensureQuiltInstall(minecraftRoot, javaPath, minecraftVersion) {
     );
   }
 
-  if (fs.existsSync(versionFile)) return versionId;
+  installInfo = getVersionInstallInfo(minecraftRoot, versionId);
+  if (repairInheritedVersionJar(minecraftRoot, versionId)) {
+    installInfo = getVersionInstallInfo(minecraftRoot, versionId);
+  }
+  if (installInfo.isValid) return versionId;
 
   // Fallback: some installers may choose a slightly different directory name.
   const versionsDir = path.join(minecraftRoot, "versions");
@@ -727,7 +819,7 @@ async function ensureQuiltInstall(minecraftRoot, javaPath, minecraftVersion) {
             entry.isDirectory() &&
             entry.name.startsWith("quilt-loader-") &&
             entry.name.endsWith(`-${minecraftVersion}`) &&
-            fs.existsSync(path.join(versionsDir, entry.name, `${entry.name}.json`))
+            getVersionInstallInfo(minecraftRoot, entry.name).isValid
         )
         .map((entry) => {
           const full = path.join(versionsDir, entry.name);
@@ -786,6 +878,10 @@ async function modrinthPickDownload(slug, minecraftVersion, launchType) {
 async function ensureModrinthMods(minecraftRoot, minecraftVersion, launchType) {
   const selected = String(launchType || "").toLowerCase();
   if (selected !== "fabric" && selected !== "quilt") return;
+  if (selected === "quilt") {
+    appendLog("[mods] Skipping automatic performance mod pack for Quilt to avoid loader compatibility issues.");
+    return;
+  }
 
   const modsDir = path.join(minecraftRoot, "mods");
   ensureDir(modsDir);
@@ -812,6 +908,86 @@ async function ensureModrinthMods(minecraftRoot, minecraftVersion, launchType) {
   }
 }
 
+async function ensureZenClientDependencies(minecraftRoot, minecraftVersion, launchType) {
+  const selected = String(launchType || "").toLowerCase();
+  if (selected !== "fabric" && selected !== "quilt") return;
+
+  const modsDir = path.join(minecraftRoot, "mods");
+  ensureDir(modsDir);
+
+  for (const mod of ZEN_CLIENT_REQUIRED_MODS) {
+    const target = path.join(modsDir, `${mod.slug}.jar`);
+    if (fs.existsSync(target)) continue;
+
+    try {
+      appendLog(`[zen-mod] Resolving dependency ${mod.label}...`);
+      const download = await modrinthPickDownload(mod.slug, minecraftVersion, launchType);
+      if (!download) {
+        appendLog(`[zen-mod] No compatible ${mod.label} build was found for ${selected} ${minecraftVersion}.`);
+        continue;
+      }
+      await ensureFile(download.url, target);
+      appendLog(`[zen-mod] Installed dependency ${mod.label} -> ${path.basename(target)}`);
+    } catch (error) {
+      appendLog(`[zen-mod] Failed to install dependency ${mod.label}: ${error?.message || String(error)}`);
+    }
+  }
+}
+
+function resolveBundledZenClientModPath() {
+  const directCandidates = [
+    app.isPackaged ? path.join(process.resourcesPath, "bundled-mods", ZEN_CLIENT_MOD_FILENAME) : null,
+    path.join(__dirname, "bundled-mods", ZEN_CLIENT_MOD_FILENAME)
+  ];
+
+  const direct = pickNewestFile(directCandidates);
+  if (direct) return direct;
+
+  const devLibsDir = path.join(__dirname, "zen-client-mod", "build", "libs");
+  if (!fs.existsSync(devLibsDir)) return null;
+
+  const jars = fs
+    .readdirSync(devLibsDir)
+    .filter((file) => file.endsWith(".jar"))
+    .filter((file) => !file.endsWith("-sources.jar"))
+    .filter((file) => !file.endsWith("-dev.jar"))
+    .map((file) => path.join(devLibsDir, file));
+
+  return pickNewestFile(jars);
+}
+
+async function ensureZenClientMod(minecraftRoot, launchType) {
+  const selected = String(launchType || "").toLowerCase();
+  if (selected !== "fabric" && selected !== "quilt") return;
+
+  const source = resolveBundledZenClientModPath();
+  if (!source) {
+    appendLog("[zen-mod] No bundled Zen Client mod was found. Skipping auto-install.");
+    return;
+  }
+
+  const modsDir = path.join(minecraftRoot, "mods");
+  ensureDir(modsDir);
+  const target = path.join(modsDir, ZEN_CLIENT_MOD_FILENAME);
+
+  const sourceStat = fs.statSync(source);
+  const targetStat = fs.existsSync(target) ? fs.statSync(target) : null;
+  const needsCopy =
+    !targetStat ||
+    targetStat.size !== sourceStat.size ||
+    Math.abs(targetStat.mtimeMs - sourceStat.mtimeMs) > 1000;
+
+  if (!needsCopy) return;
+
+  fs.copyFileSync(source, target);
+  try {
+    fs.utimesSync(target, sourceStat.atime, sourceStat.mtime);
+  } catch {
+    // ignore timestamp sync failures
+  }
+  appendLog(`[zen-mod] Installed bundled Zen Client mod for ${selected} -> ${path.basename(target)}`);
+}
+
 async function launchGame(settings) {
   const state = loadState();
   const account = state.accounts.find((item) => item.id === state.selectedAccountId);
@@ -835,6 +1011,8 @@ async function launchGame(settings) {
     customVersion = await ensureQuiltInstall(minecraftRoot, javaPath, selectedVersion);
   }
 
+  await ensureZenClientDependencies(minecraftRoot, selectedVersion, selectedType);
+  await ensureZenClientMod(minecraftRoot, selectedType);
   // Auto-install requested performance mods for Fabric/Quilt.
   await ensureModrinthMods(minecraftRoot, selectedVersion, selectedType);
 
@@ -1095,8 +1273,14 @@ ipcMain.handle("account:microsoftLogin", async () => {
   };
 });
 ipcMain.handle("launch:start", async (_event, settings) => {
-  await launchGame(settings);
-  return true;
+  try {
+    await launchGame(settings);
+    return true;
+  } catch (error) {
+    const message = formatInvokeError(error);
+    appendLog(`[launch] Failed to start: ${message}`);
+    throw new Error(message);
+  }
 });
 
 ipcMain.handle("shell:openExternal", async (_event, url) => {
@@ -1104,6 +1288,19 @@ ipcMain.handle("shell:openExternal", async (_event, url) => {
   if (!target) throw new Error("Missing URL.");
   await shell.openExternal(target);
   return true;
+});
+
+ipcMain.handle("shell:openFolder", async (_event, payload) => {
+  const root = String(payload?.minecraftDirectory || DEFAULT_ROOT).trim() || DEFAULT_ROOT;
+  const kind = String(payload?.kind || "mods").trim().toLowerCase();
+  const folderName = kind === "resourcepacks" ? "resourcepacks" : "mods";
+  const targetDir = path.join(root, folderName);
+  ensureDir(targetDir);
+  const result = await shell.openPath(targetDir);
+  if (result) {
+    throw new Error(result);
+  }
+  return { path: targetDir };
 });
 
 async function modrinthFetchJson(url) {
@@ -1179,6 +1376,32 @@ ipcMain.handle("modrinth:install", async (_event, payload) => {
   fs.writeFileSync(outPath, buffer);
   appendLog(`[modrinth] Installed ${fileName}`);
   return { path: outPath, fileName };
+});
+
+ipcMain.handle("update:startDownload", async () => {
+  if (!autoUpdaterRef) throw new Error("Auto-update is only available in the installed build.");
+  setUpdateState({
+    stage: "downloading",
+    visible: true,
+    action: null,
+    message: "Downloading update...",
+    progressPercent: 0
+  });
+  await autoUpdaterRef.downloadUpdate();
+  return true;
+});
+
+ipcMain.handle("update:installNow", async () => {
+  if (!autoUpdaterRef) throw new Error("Auto-update is only available in the installed build.");
+  setUpdateState({
+    stage: "installing",
+    visible: true,
+    action: null,
+    message: "Installing update...",
+    progressPercent: 100
+  });
+  autoUpdaterRef.quitAndInstall();
+  return true;
 });
 
 ipcMain.handle("skin:getProfile", async () => {

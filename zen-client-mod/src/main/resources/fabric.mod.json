@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "zen_client_mod",
+  "version": "${version}",
+  "name": "Zen Client Mod",
+  "description": "In-game Zen Client settings and PvP HUD helpers.",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.eddyplaysrizz467.zenclientmod.ZenClientMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.14",
+    "minecraft": "~1.21.11",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
