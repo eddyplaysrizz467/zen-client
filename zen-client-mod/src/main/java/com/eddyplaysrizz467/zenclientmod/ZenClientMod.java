@@ -1,10 +1,14 @@
 package com.eddyplaysrizz467.zenclientmod;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
+import java.util.Set;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
@@ -19,31 +23,41 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.TamableAnimal;
+import net.minecraft.world.entity.animal.Animal;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.monster.Enemy;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.EntityHitResult;
+import net.minecraft.world.phys.Vec3;
+import org.lwjgl.glfw.GLFW;
 
 public final class ZenClientMod implements ClientModInitializer {
-  private static final int MAX_VISIBLE_MODULES = 5;
+  private static final int MAX_VISIBLE_MODULES = 10;
   private static final long CLICK_WINDOW_MS = 1000L;
   private static final int FULLBRIGHT_NIGHT_VISION_DURATION = 1_000_000;
   private static final int HUD_BOX_PADDING = 4;
   private static final int HUD_BOX_HEIGHT = 18;
   private static final int HUD_BOX_GAP = 4;
-  private static final int COMPASS_REFRESH_TICKS = 1;
 
+  private static ZenClientMod INSTANCE;
   private static ZenConfig CONFIG;
   private static final Deque<Long> LEFT_CLICKS = new ArrayDeque<>();
   private static final Deque<Long> RIGHT_CLICKS = new ArrayDeque<>();
   private static final Deque<Double> SERVER_TPS_SAMPLES = new ArrayDeque<>();
+  private static final Set<Integer> ESP_ENTITY_IDS = new HashSet<>();
 
   private static boolean lastAttackDown = false;
   private static boolean lastUseDown = false;
+  private static boolean lastCtrlPDown = false;
   private static long lastServerSampleAt = 0L;
   private static long lastWorldGameTime = Long.MIN_VALUE;
   private static double estimatedServerTps = 20.0D;
@@ -52,11 +66,25 @@ public final class ZenClientMod implements ClientModInitializer {
   private static double lastReach = 0.0D;
   private static float lastTargetHealth = -1.0F;
   private static float previousGamma = 1.0F;
+  private static int previousFov = 70;
+  private static int previousSimulationDistance = 12;
+  private static double previousEntityDistanceScaling = 1.0D;
+  private static int previousMipmapLevels = 4;
+  private static boolean previousAutoJump = false;
+  private static boolean previousBobView = true;
+  private static boolean previousAo = true;
+  private static boolean previousVsync = false;
+  private static boolean previousMayfly = false;
+  private static boolean previousFlying = false;
+  private static float previousFlightSpeed = 0.05F;
   private static boolean gammaBoostApplied = false;
   private static boolean addedZenNightVision = false;
+  private static boolean fovLockApplied = false;
+  private static boolean autoJumpApplied = false;
+  private static boolean noBobApplied = false;
+  private static boolean pureFpsApplied = false;
+  private static boolean flightApplied = false;
   private static int hitPulseTicks = 0;
-  private static int compassRefreshCooldown = 0;
-  private static String compassLine = "Compass [N]";
 
   public static ZenConfig config() {
     return CONFIG;
@@ -64,6 +92,7 @@ public final class ZenClientMod implements ClientModInitializer {
 
   @Override
   public void onInitializeClient() {
+    INSTANCE = this;
     CONFIG = ZenConfig.load();
 
     ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
@@ -81,9 +110,12 @@ public final class ZenClientMod implements ClientModInitializer {
   }
 
   private void onEndTick(Minecraft client) {
+    handleActiveModulesHotkey(client);
+
     if (client.player == null) {
       pruneClicks(System.currentTimeMillis());
       maintainFullbright(client, null);
+      maintainClientOptions(client);
       return;
     }
 
@@ -103,8 +135,10 @@ public final class ZenClientMod implements ClientModInitializer {
 
     LocalPlayer player = client.player;
     updateEstimatedServerTps(client);
-    updateCompass(player);
     maintainFullbright(client, player);
+    maintainClientOptions(client);
+    maintainFlight(client, player);
+    maintainEsp(client);
 
     if (CONFIG.isEnabled(ZenFeature.TOGGLE_SPRINT) || CONFIG.isEnabled(ZenFeature.SPRINT_ASSIST)) {
       if (player.input != null && player.input.hasForwardImpulse() && !player.isShiftKeyDown()) {
@@ -139,10 +173,19 @@ public final class ZenClientMod implements ClientModInitializer {
     lastWorldGameTime = Long.MIN_VALUE;
     estimatedServerTps = 20.0D;
     hitPulseTicks = 0;
-    compassRefreshCooldown = 0;
-    compassLine = "Compass [N]";
     gammaBoostApplied = false;
     addedZenNightVision = false;
+    fovLockApplied = false;
+    autoJumpApplied = false;
+    noBobApplied = false;
+    pureFpsApplied = false;
+    flightApplied = false;
+    ESP_ENTITY_IDS.clear();
+  }
+
+  public static List<String> activeModuleLines(Minecraft client) {
+    if (INSTANCE == null || client == null || client.player == null) return List.of();
+    return INSTANCE.buildModules(client);
   }
 
   private void pruneClicks(long nowMs) {
@@ -198,20 +241,42 @@ public final class ZenClientMod implements ClientModInitializer {
   private void renderCompassHud(Minecraft client, GuiGraphics drawContext) {
     if (!CONFIG.isEnabled(ZenFeature.COMPASS)) return;
 
-    String text = compassLine;
-    int textWidth = client.font.width(text);
+    float yaw = Mth.wrapDegrees(client.player.getYRot());
+    String heading = headingFromYaw(yaw);
+    int degrees = Math.floorMod(Math.round(yaw), 360);
+    String degreeText = String.format(Locale.US, "%03d° %s", degrees, heading);
+
     int centerX = client.getWindow().getGuiScaledWidth() / 2;
-    int x = centerX - (textWidth / 2);
-    int y = client.getWindow().getGuiScaledHeight() - 42;
+    int y = client.getWindow().getGuiScaledHeight() - 46;
+    int barWidth = 180;
+    int barLeft = centerX - (barWidth / 2);
+    int barRight = centerX + (barWidth / 2);
+    int barTop = y - 11;
+    int barBottom = y + 11;
 
     drawContext.fill(
-      x - HUD_BOX_PADDING,
-      y - HUD_BOX_PADDING,
-      x + textWidth + HUD_BOX_PADDING,
-      y + HUD_BOX_HEIGHT,
+      barLeft - 8,
+      barTop - 8,
+      barRight + 8,
+      barBottom + 16,
       0x8C050505
     );
-    drawContext.drawString(client.font, Component.literal(text), x, y + 4, 0xFFFFFFFF, true);
+    drawContext.fill(centerX - 1, barTop + 2, centerX + 1, barBottom - 2, 0xFFFF5A5A);
+    drawContext.drawCenteredString(client.font, Component.literal(degreeText), centerX, y + 14, 0xFFFFFFFF);
+
+    for (int marker = 0; marker < 360; marker += 15) {
+      float delta = wrapDegreesForHud(marker - yaw);
+      if (Math.abs(delta) > 70.0F) continue;
+
+      int markerX = centerX + Math.round(delta * 1.25F);
+      int tickHeight = marker % 90 == 0 ? 10 : (marker % 45 == 0 ? 7 : 4);
+      int color = marker == 0 ? 0xFFFF6B6B : 0xD9F1F1F1;
+      drawContext.fill(markerX, y - tickHeight / 2, markerX + 1, y + tickHeight / 2, color);
+
+      if (marker % 45 == 0) {
+        drawContext.drawCenteredString(client.font, Component.literal(cardinalLabel(marker)), markerX, y - 18, color);
+      }
+    }
   }
 
   private void updateEstimatedServerTps(Minecraft client) {
@@ -271,17 +336,167 @@ public final class ZenClientMod implements ClientModInitializer {
     addedZenNightVision = false;
   }
 
-  private void updateCompass(LocalPlayer player) {
-    if (compassRefreshCooldown > 0) {
-      compassRefreshCooldown -= 1;
+  private void maintainClientOptions(Minecraft client) {
+    if (CONFIG.isEnabled(ZenFeature.AUTO_JUMP)) {
+      if (!autoJumpApplied) {
+        previousAutoJump = client.options.autoJump().get();
+        autoJumpApplied = true;
+      }
+      client.options.autoJump().set(true);
+    } else if (autoJumpApplied) {
+      client.options.autoJump().set(previousAutoJump);
+      autoJumpApplied = false;
+    }
+
+    if (CONFIG.isEnabled(ZenFeature.NO_BOB)) {
+      if (!noBobApplied) {
+        previousBobView = client.options.bobView().get();
+        noBobApplied = true;
+      }
+      client.options.bobView().set(false);
+    } else if (noBobApplied) {
+      client.options.bobView().set(previousBobView);
+      noBobApplied = false;
+    }
+
+    if (CONFIG.isEnabled(ZenFeature.FOV_LOCK)) {
+      if (!fovLockApplied) {
+        previousFov = client.options.fov().get();
+        fovLockApplied = true;
+      }
+      client.options.fov().set(70);
+    } else if (fovLockApplied) {
+      client.options.fov().set(previousFov);
+      fovLockApplied = false;
+    }
+
+    if (CONFIG.isEnabled(ZenFeature.PURE_FPS)) {
+      if (!pureFpsApplied) {
+        previousSimulationDistance = client.options.simulationDistance().get();
+        previousEntityDistanceScaling = client.options.entityDistanceScaling().get();
+        previousMipmapLevels = client.options.mipmapLevels().get();
+        previousAo = client.options.ambientOcclusion().get();
+        previousVsync = client.options.enableVsync().get();
+        pureFpsApplied = true;
+      }
+
+      client.options.simulationDistance().set(4);
+      client.options.entityDistanceScaling().set(0.5D);
+      client.options.mipmapLevels().set(0);
+      client.options.ambientOcclusion().set(false);
+      client.options.enableVsync().set(false);
+      client.options.bobView().set(false);
+      client.options.fov().set(70);
+    } else if (pureFpsApplied) {
+      client.options.simulationDistance().set(previousSimulationDistance);
+      client.options.entityDistanceScaling().set(previousEntityDistanceScaling);
+      client.options.mipmapLevels().set(previousMipmapLevels);
+      client.options.ambientOcclusion().set(previousAo);
+      client.options.enableVsync().set(previousVsync);
+      pureFpsApplied = false;
+    }
+  }
+
+  private void maintainFlight(Minecraft client, LocalPlayer player) {
+    if (!CONFIG.isEnabled(ZenFeature.FLIGHT)) {
+      if (flightApplied) {
+        player.getAbilities().mayfly = previousMayfly;
+        player.getAbilities().flying = previousMayfly && previousFlying;
+        player.getAbilities().setFlyingSpeed(previousFlightSpeed);
+        player.onUpdateAbilities();
+        flightApplied = false;
+      }
       return;
     }
 
-    float yaw = Mth.wrapDegrees(player.getYRot());
-    String heading = headingFromYaw(yaw);
-    String pointer = buildCompassPointer(yaw);
-    compassLine = format("Compass %s %s %.1f°", pointer, heading, yaw);
-    compassRefreshCooldown = COMPASS_REFRESH_TICKS;
+    if (!flightApplied) {
+      previousMayfly = player.getAbilities().mayfly;
+      previousFlying = player.getAbilities().flying;
+      previousFlightSpeed = player.getAbilities().getFlyingSpeed();
+      flightApplied = true;
+    }
+
+    ZenFlightMode mode = CONFIG.flightMode();
+    float speed = (float) Mth.clamp(CONFIG.flightSpeed(), 0.4D, 3.0D);
+
+    player.getAbilities().mayfly = true;
+    player.getAbilities().flying = true;
+    player.getAbilities().setFlyingSpeed(0.05F * speed);
+
+    if (mode == ZenFlightMode.DRIFT) {
+      Vec3 movement = player.getDeltaMovement();
+      double driftDown = client.options.keyShift.isDown() ? -0.18D * speed : -0.03D;
+      player.setDeltaMovement(movement.x * 0.96D, Math.max(movement.y, driftDown), movement.z * 0.96D);
+    } else if (mode == ZenFlightMode.DASH) {
+      if (player.input != null && player.input.hasForwardImpulse()) {
+        Vec3 look = player.getLookAngle();
+        Vec3 flat = new Vec3(look.x, 0.0D, look.z);
+        if (flat.lengthSqr() > 0.0001D) {
+          Vec3 dash = flat.normalize().scale(0.055D * speed);
+          player.setDeltaMovement(player.getDeltaMovement().add(dash));
+        }
+      }
+    }
+
+    player.onUpdateAbilities();
+  }
+
+  private void maintainEsp(Minecraft client) {
+    if (client.level == null || client.player == null) return;
+
+    if (!CONFIG.isEnabled(ZenFeature.ESP)) {
+      clearEsp(client);
+      return;
+    }
+
+    Set<Integer> nextIds = new HashSet<>();
+    for (Entity entity : client.level.entitiesForRendering()) {
+      if (entity == client.player) continue;
+      if (!matchesEspTarget(entity)) continue;
+      entity.setGlowingTag(true);
+      nextIds.add(entity.getId());
+    }
+
+    for (Integer id : ESP_ENTITY_IDS) {
+      if (nextIds.contains(id)) continue;
+      Entity entity = client.level.getEntity(id);
+      if (entity != null) entity.setGlowingTag(false);
+    }
+
+    ESP_ENTITY_IDS.clear();
+    ESP_ENTITY_IDS.addAll(nextIds);
+  }
+
+  private void clearEsp(Minecraft client) {
+    if (client.level == null) return;
+    for (Integer id : ESP_ENTITY_IDS) {
+      Entity entity = client.level.getEntity(id);
+      if (entity != null) entity.setGlowingTag(false);
+    }
+    ESP_ENTITY_IDS.clear();
+  }
+
+  private boolean matchesEspTarget(Entity entity) {
+    for (ZenEspTarget target : CONFIG.orderedEspTargets()) {
+      if (matchesEspTarget(target, entity)) return true;
+    }
+    return false;
+  }
+
+  private boolean matchesEspTarget(ZenEspTarget target, Entity entity) {
+    String typeName = entity.getType().toString().toLowerCase(Locale.ROOT);
+    return switch (target) {
+      case PLAYERS -> entity instanceof Player;
+      case HOSTILE -> entity instanceof Enemy;
+      case PASSIVE -> entity instanceof Animal;
+      case VILLAGERS -> typeName.contains("villager") || typeName.contains("trader");
+      case ITEMS -> entity instanceof ItemEntity;
+      case PROJECTILES -> entity instanceof Projectile;
+      case BOATS -> typeName.contains("boat") || typeName.contains("raft");
+      case MINECARTS -> typeName.contains("minecart");
+      case ENDER_CRYSTALS -> typeName.contains("end_crystal");
+      case TAMED -> entity instanceof TamableAnimal tamable && tamable.isTame();
+    };
   }
 
   private void renderCenterEffects(Minecraft client, GuiGraphics drawContext) {
@@ -312,8 +527,15 @@ public final class ZenClientMod implements ClientModInitializer {
         case TPS_COUNTER -> format("TPS %.1f", estimatedServerTps);
         case FPS_COUNTER -> "FPS " + Minecraft.getInstance().getFps();
         case PING_COUNTER -> buildPing(client);
-        case COORDINATES -> format("XYZ %d %d %d", Mth.floor(player.getX()), Mth.floor(player.getY()), Mth.floor(player.getZ()));
-        case DIRECTION -> "Facing " + player.getDirection().getName();
+        case COORDINATES -> format("XYZ %.1f %.1f %.1f", player.getX(), player.getY(), player.getZ());
+        case CLOCK -> buildClock(client);
+        case DAY_COUNTER -> "Day " + buildDayCount(client);
+        case BIOME -> "Biome " + buildBiome(client);
+        case SPEED -> format("Speed %.2f b/s", buildHorizontalSpeed(player));
+        case LIGHT_LEVEL -> "Light " + client.level.getMaxLocalRawBrightness(player.blockPosition());
+        case HELD_DURABILITY -> buildHeldDurability(player);
+        case SNEAK_STATUS -> player.isShiftKeyDown() ? "Sneaking" : "Standing";
+        case DIRECTION -> format("Facing %s %03d", player.getDirection().getName().toUpperCase(Locale.US), Math.floorMod(Math.round(Mth.wrapDegrees(player.getYRot())), 360));
         case CPS_COUNTER -> "CPS " + LEFT_CLICKS.size() + " | " + RIGHT_CLICKS.size();
         case COMBO_COUNTER -> "Combo " + comboCount;
         case REACH_DISPLAY -> lastReach > 0.0D ? format("Reach %.2f", lastReach) : "Reach --";
@@ -324,8 +546,14 @@ public final class ZenClientMod implements ClientModInitializer {
         case ARMOR_STATUS -> buildArmorStatus(player);
         case POTION_STATUS -> "Effects " + player.getActiveEffects().size();
         case TARGET_HEALTH -> lastTargetHealth >= 0.0F ? format("Target %.1f", lastTargetHealth) : "Target --";
+        case ESP -> buildEspStatus();
         case TOGGLE_SPRINT -> "Toggle Sprint";
         case SPRINT_ASSIST -> "Sprint Assist";
+        case AUTO_JUMP -> "Auto Jump";
+        case NO_BOB -> "No Bob";
+        case FOV_LOCK -> "FOV Lock";
+        case FLIGHT -> buildFlightStatus();
+        case PURE_FPS -> "Pure FPS";
         case CLEAN_CROSSHAIR -> "Clean Crosshair";
         case HIT_COLOR -> "Hit Color Pulse";
         case FULLBRIGHT -> "Fullbright";
@@ -338,11 +566,63 @@ public final class ZenClientMod implements ClientModInitializer {
     return modules;
   }
 
+  private String buildFlightStatus() {
+    return format("Flight %s %.1fx", CONFIG.flightMode().label(), CONFIG.flightSpeed());
+  }
+
   private String buildPing(Minecraft client) {
     if (client.getConnection() == null || client.player == null) return "Ping --";
     var info = client.getConnection().getPlayerInfo(client.player.getUUID());
     if (info == null) return "Ping --";
     return "Ping " + info.getLatency() + "ms";
+  }
+
+  private String buildClock(Minecraft client) {
+    if (client.level == null) return "Clock --:--";
+    long timeOfDay = client.level.getDayTime() % 24000L;
+    int hours = (int) ((timeOfDay / 1000L + 6L) % 24L);
+    int minutes = (int) Math.round((timeOfDay % 1000L) * 0.06D);
+    if (minutes >= 60) {
+      minutes = 0;
+      hours = (hours + 1) % 24;
+    }
+    return String.format(Locale.US, "Clock %02d:%02d", hours, minutes);
+  }
+
+  private long buildDayCount(Minecraft client) {
+    if (client.level == null) return 0L;
+    return (client.level.getDayTime() / 24000L) + 1L;
+  }
+
+  private String buildBiome(Minecraft client) {
+    if (client.level == null || client.player == null) return "--";
+    Optional<String> biomePath = client.level.getBiome(client.player.blockPosition()).unwrapKey().map((key) -> {
+      String raw = key.toString();
+      int slash = raw.lastIndexOf('/');
+      return slash >= 0 ? raw.substring(slash + 1) : raw;
+    });
+    return biomePath.map(this::humanizeId).orElse("--");
+  }
+
+  private double buildHorizontalSpeed(LocalPlayer player) {
+    double dx = player.getX() - player.xo;
+    double dz = player.getZ() - player.zo;
+    return Math.sqrt((dx * dx) + (dz * dz)) * 20.0D;
+  }
+
+  private String buildHeldDurability(Player player) {
+    ItemStack stack = player.getMainHandItem();
+    if (stack.isEmpty()) return "Held --";
+    if (!stack.isDamageableItem()) return stack.getHoverName().getString();
+    int remaining = stack.getMaxDamage() - stack.getDamageValue();
+    return stack.getHoverName().getString() + " " + remaining;
+  }
+
+  private String buildEspStatus() {
+    List<ZenEspTarget> targets = CONFIG.orderedEspTargets();
+    if (targets.isEmpty()) return "ESP --";
+    if (targets.size() == 1) return "ESP " + targets.get(0).label();
+    return "ESP " + targets.get(0).label() + " +" + (targets.size() - 1);
   }
 
   private String buildKeystrokes(Minecraft client) {
@@ -418,17 +698,51 @@ public final class ZenClientMod implements ClientModInitializer {
     return "SE";
   }
 
-  private String buildCompassPointer(float yaw) {
-    String[] ring = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
-    float normalized = Mth.wrapDegrees(yaw + 180.0F);
-    int center = Math.floorMod(Math.round(normalized / 45.0F), ring.length);
-    StringBuilder out = new StringBuilder("[");
-    for (int offset = -2; offset <= 2; offset++) {
-      if (offset > -2) out.append(" ");
-      String label = ring[Math.floorMod(center + offset, ring.length)];
-      out.append(offset == 0 ? ">" + label + "<" : label);
+  private float wrapDegreesForHud(float value) {
+    float wrapped = value % 360.0F;
+    if (wrapped >= 180.0F) wrapped -= 360.0F;
+    if (wrapped < -180.0F) wrapped += 360.0F;
+    return wrapped;
+  }
+
+  private String cardinalLabel(int degrees) {
+    return switch (Math.floorMod(degrees, 360)) {
+      case 0 -> "N";
+      case 45 -> "NE";
+      case 90 -> "E";
+      case 135 -> "SE";
+      case 180 -> "S";
+      case 225 -> "SW";
+      case 270 -> "W";
+      case 315 -> "NW";
+      default -> "";
+    };
+  }
+
+  private String humanizeId(String value) {
+    String[] parts = value.split("_");
+    StringBuilder out = new StringBuilder();
+    for (String part : parts) {
+      if (part.isBlank()) continue;
+      if (!out.isEmpty()) out.append(" ");
+      out.append(Character.toUpperCase(part.charAt(0)));
+      if (part.length() > 1) out.append(part.substring(1));
     }
-    out.append("]");
     return out.toString();
+  }
+
+  private void handleActiveModulesHotkey(Minecraft client) {
+    if (client == null) return;
+    var window = client.getWindow();
+    boolean ctrlDown = InputConstants.isKeyDown(window, GLFW.GLFW_KEY_LEFT_CONTROL)
+      || InputConstants.isKeyDown(window, GLFW.GLFW_KEY_RIGHT_CONTROL);
+    boolean pDown = InputConstants.isKeyDown(window, GLFW.GLFW_KEY_P);
+    boolean comboDown = ctrlDown && pDown;
+
+    if (comboDown && !lastCtrlPDown && client.screen == null) {
+      client.setScreen(new ZenActiveModulesScreen());
+    }
+
+    lastCtrlPDown = comboDown;
   }
 }
