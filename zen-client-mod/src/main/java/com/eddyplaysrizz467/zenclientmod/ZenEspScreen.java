@@ -51,7 +51,6 @@ public final class ZenEspScreen extends Screen {
 
   @Override
   public void render(GuiGraphics context, int mouseX, int mouseY, float delta) {
-    this.renderBackground(context, mouseX, mouseY, delta);
     int panelLeft = (this.width / 2) - 250;
     int panelRight = (this.width / 2) + 250;
     int panelTop = 18;

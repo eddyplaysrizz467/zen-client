@@ -69,7 +69,6 @@ public final class ZenFlightScreen extends Screen {
 
   @Override
   public void render(GuiGraphics context, int mouseX, int mouseY, float delta) {
-    this.renderBackground(context, mouseX, mouseY, delta);
     int panelLeft = (this.width / 2) - 200;
     int panelRight = (this.width / 2) + 200;
     int panelTop = 18;
