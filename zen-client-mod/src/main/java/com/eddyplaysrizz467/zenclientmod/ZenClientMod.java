@@ -22,6 +22,7 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -655,6 +656,9 @@ public final class ZenClientMod implements ClientModInitializer {
   private void maintainAntiFall(LocalPlayer player) {
     if (!CONFIG.isEnabled(ZenFeature.ANTI_FALL)) return;
     if (player.fallDistance > 2.0F) {
+      if (player.connection != null) {
+        player.connection.send(new ServerboundMovePlayerPacket.StatusOnly(true, player.horizontalCollision));
+      }
       player.resetFallDistance();
       if (player.getDeltaMovement().y < -0.7D) {
         player.setDeltaMovement(player.getDeltaMovement().x, -0.35D, player.getDeltaMovement().z);
