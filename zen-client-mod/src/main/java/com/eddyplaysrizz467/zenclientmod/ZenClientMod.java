@@ -117,6 +117,18 @@ public final class ZenClientMod implements ClientModInitializer {
     }
   }
 
+  private static final class CameraBasis {
+    private final Vec3 right;
+    private final Vec3 up;
+    private final Vec3 forward;
+
+    private CameraBasis(Vec3 right, Vec3 up, Vec3 forward) {
+      this.right = right;
+      this.up = up;
+      this.forward = forward;
+    }
+  }
+
   public static ZenConfig config() {
     return CONFIG;
   }
@@ -655,33 +667,43 @@ public final class ZenClientMod implements ClientModInitializer {
     int centerX = client.getWindow().getGuiScaledWidth() / 2;
     int centerY = client.getWindow().getGuiScaledHeight() / 2;
     double fov = Math.max(40.0D, client.options.fov().get());
+    CameraBasis basis = buildCameraBasis(client.player);
 
     for (int i = 0; i < limit; i++) {
       Entity entity = targets.get(i);
-      Vec3 anchor = entity.getBoundingBox().getCenter().add(0.0D, entity.getBbHeight() * 0.25D, 0.0D);
-      ProjectedPoint projected = projectToHud(client, anchor, fov);
-      int x = projected.x;
-      int y = projected.y;
+      Vec3 center = entity.getBoundingBox().getCenter();
+      Vec3 topAnchor = center.add(0.0D, entity.getBbHeight() * 0.5D + 0.1D, 0.0D);
+      Vec3 midAnchor = center.add(0.0D, entity.getBbHeight() * 0.15D, 0.0D);
+      Vec3 bottomAnchor = center.add(0.0D, -entity.getBbHeight() * 0.5D, 0.0D);
+
+      ProjectedPoint projectedMid = projectToHud(client, midAnchor, fov, basis);
+      ProjectedPoint projectedTop = projectToHud(client, topAnchor, fov, basis);
+      ProjectedPoint projectedBottom = projectToHud(client, bottomAnchor, fov, basis);
+
+      int x = projectedMid.x;
+      int y = projectedMid.y;
       int color = espColorFor(entity);
       int distance = Math.round((float) Math.sqrt(client.player.distanceToSqr(entity)));
       String text = entity.getName().getString() + " " + distance + "m";
       int width = client.font.width(text);
+      int boxHeight = Math.max(20, Math.abs(projectedBottom.y - projectedTop.y));
+      int boxHalfHeight = Math.max(10, boxHeight / 2);
+      int boxHalfWidth = Math.max(10, Math.round(boxHalfHeight * 0.38F));
 
       if (CONFIG.isEnabled(ZenFeature.TRACERS)) {
-        drawTracerLine(drawContext, centerX, centerY + 18, x, y, (color & 0x00FFFFFF) | 0x8C000000);
+        int tracerTargetY = projectedBottom.behind ? y : Math.min(projectedBottom.y, y + boxHalfHeight);
+        drawTracerLine(drawContext, centerX, centerY + 18, x, tracerTargetY, (color & 0x00FFFFFF) | 0xA0000000);
       }
 
       if (CONFIG.isEnabled(ZenFeature.ESP)) {
-        int halfWidth = projected.behind ? 10 : 14;
-        int halfHeight = projected.behind ? 10 : 14;
-        drawContext.fill(x - halfWidth, y - halfHeight, x + halfWidth, y + halfHeight, 0x50101010);
-        drawContext.fill(x - halfWidth, y - halfHeight, x + halfWidth, y - halfHeight + 2, color);
-        drawContext.fill(x - halfWidth, y + halfHeight - 2, x + halfWidth, y + halfHeight, color);
-        drawContext.fill(x - halfWidth, y - halfHeight, x - halfWidth + 2, y + halfHeight, color);
-        drawContext.fill(x + halfWidth - 2, y - halfHeight, x + halfWidth, y + halfHeight, color);
-        if (projected.behind || projected.clamped) {
-          drawContext.drawCenteredString(client.font, Component.literal("<"), x - 10, y - 4, color);
-          drawContext.drawCenteredString(client.font, Component.literal(">"), x + 10, y - 4, color);
+        drawContext.fill(x - boxHalfWidth, y - boxHalfHeight, x + boxHalfWidth, y + boxHalfHeight, 0x38101010);
+        drawContext.fill(x - boxHalfWidth, y - boxHalfHeight, x + boxHalfWidth, y - boxHalfHeight + 2, color);
+        drawContext.fill(x - boxHalfWidth, y + boxHalfHeight - 2, x + boxHalfWidth, y + boxHalfHeight, color);
+        drawContext.fill(x - boxHalfWidth, y - boxHalfHeight, x - boxHalfWidth + 2, y + boxHalfHeight, color);
+        drawContext.fill(x + boxHalfWidth - 2, y - boxHalfHeight, x + boxHalfWidth, y + boxHalfHeight, color);
+        if (projectedMid.behind || projectedMid.clamped) {
+          drawContext.drawCenteredString(client.font, Component.literal("<"), x - (boxHalfWidth + 8), y - 4, color);
+          drawContext.drawCenteredString(client.font, Component.literal(">"), x + (boxHalfWidth + 8), y - 4, color);
         }
       }
 
@@ -691,10 +713,11 @@ public final class ZenClientMod implements ClientModInitializer {
           label += format(" %.1f HP", living.getHealth());
         }
         int labelWidth = client.font.width(label);
-        drawContext.fill(x - (labelWidth / 2) - 4, y - 28, x + (labelWidth / 2) + 4, y - 16, 0x7A050505);
-        drawContext.drawString(client.font, Component.literal(label), x - (labelWidth / 2), y - 25, 0xFFFFFFFF, true);
+        int tagY = y - boxHalfHeight - 14;
+        drawContext.fill(x - (labelWidth / 2) - 4, tagY - 2, x + (labelWidth / 2) + 4, tagY + 10, 0x7A050505);
+        drawContext.drawString(client.font, Component.literal(label), x - (labelWidth / 2), tagY, 0xFFFFFFFF, true);
       } else if (CONFIG.isEnabled(ZenFeature.ESP)) {
-        drawContext.drawString(client.font, Component.literal(text), x - (width / 2), y - 24, color, true);
+        drawContext.drawString(client.font, Component.literal(text), x - (width / 2), y - boxHalfHeight - 12, color, true);
       }
     }
   }
@@ -707,21 +730,25 @@ public final class ZenClientMod implements ClientModInitializer {
     return 0xFFD4D4D4;
   }
 
-  private ProjectedPoint projectToHud(Minecraft client, Vec3 worldPos, double fovDegrees) {
+  private CameraBasis buildCameraBasis(LocalPlayer player) {
+    Vec3 forward = player.getLookAngle().normalize();
+    Vec3 worldUp = new Vec3(0.0D, 1.0D, 0.0D);
+    Vec3 right = worldUp.cross(forward);
+    if (right.lengthSqr() < 0.0001D) {
+      right = new Vec3(1.0D, 0.0D, 0.0D);
+    } else {
+      right = right.normalize();
+    }
+    Vec3 up = forward.cross(right).normalize();
+    return new CameraBasis(right, up, forward);
+  }
+
+  private ProjectedPoint projectToHud(Minecraft client, Vec3 worldPos, double fovDegrees, CameraBasis basis) {
     Vec3 cameraPos = client.player.getEyePosition();
     Vec3 relative = worldPos.subtract(cameraPos);
-
-    double yaw = Math.toRadians(client.player.getYRot());
-    double pitch = Math.toRadians(client.player.getXRot());
-    double cosYaw = Math.cos(-yaw);
-    double sinYaw = Math.sin(-yaw);
-    double x1 = (relative.x * cosYaw) - (relative.z * sinYaw);
-    double z1 = (relative.x * sinYaw) + (relative.z * cosYaw);
-
-    double cosPitch = Math.cos(-pitch);
-    double sinPitch = Math.sin(-pitch);
-    double y2 = (relative.y * cosPitch) - (z1 * sinPitch);
-    double z2 = (relative.y * sinPitch) + (z1 * cosPitch);
+    double cameraX = relative.dot(basis.right);
+    double cameraY = relative.dot(basis.up);
+    double cameraZ = relative.dot(basis.forward);
 
     int width = client.getWindow().getGuiScaledWidth();
     int height = client.getWindow().getGuiScaledHeight();
@@ -731,16 +758,16 @@ public final class ZenClientMod implements ClientModInitializer {
     int edgeY = 18;
     double aspect = Math.max(1.0D, width / (double) height);
     double tan = Math.tan(Math.toRadians(fovDegrees) / 2.0D);
-    boolean behind = z2 <= 0.05D;
+    boolean behind = cameraZ <= 0.05D;
 
     double ndcX;
     double ndcY;
     if (behind) {
-      ndcX = x1 >= 0.0D ? 1.15D : -1.15D;
-      ndcY = Mth.clamp(-y2 / 8.0D, -0.85D, 0.85D);
+      ndcX = cameraX >= 0.0D ? 1.12D : -1.12D;
+      ndcY = Mth.clamp(-(cameraY / Math.max(1.0D, Math.abs(cameraX) + Math.abs(cameraZ))) * 1.4D, -0.9D, 0.9D);
     } else {
-      ndcX = (x1 / (z2 * tan)) / aspect;
-      ndcY = -(y2 / (z2 * tan));
+      ndcX = (cameraX / (cameraZ * tan)) / aspect;
+      ndcY = -(cameraY / (cameraZ * tan));
     }
 
     int rawX = centerX + (int) Math.round(ndcX * centerX);
