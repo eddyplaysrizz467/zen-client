@@ -737,8 +737,18 @@ public final class ZenClientMod implements ClientModInitializer {
       rawX = yawDelta >= 0.0F ? width - edgeX : edgeX;
       rawY = centerY;
     } else {
-      rawX = (int) Math.round(projected.x);
-      rawY = (int) Math.round(projected.y);
+      double px = projected.x;
+      double py = projected.y;
+      if (px >= 0.0D && px <= 1.0D && py >= 0.0D && py <= 1.0D) {
+        rawX = (int) Math.round(px * width);
+        rawY = (int) Math.round(py * height);
+      } else if (Math.abs(px) <= 1.0D && Math.abs(py) <= 1.0D) {
+        rawX = (int) Math.round((px * 0.5D + 0.5D) * width);
+        rawY = (int) Math.round((0.5D - py * 0.5D) * height);
+      } else {
+        rawX = (int) Math.round(px);
+        rawY = (int) Math.round(py);
+      }
     }
     int clampedX = Mth.clamp(rawX, edgeX, width - edgeX);
     int clampedY = Mth.clamp(rawY, edgeY, height - edgeY - 24);
