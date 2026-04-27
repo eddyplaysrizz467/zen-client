@@ -117,18 +117,6 @@ public final class ZenClientMod implements ClientModInitializer {
     }
   }
 
-  private static final class CameraBasis {
-    private final Vec3 right;
-    private final Vec3 up;
-    private final Vec3 forward;
-
-    private CameraBasis(Vec3 right, Vec3 up, Vec3 forward) {
-      this.right = right;
-      this.up = up;
-      this.forward = forward;
-    }
-  }
-
   public static ZenConfig config() {
     return CONFIG;
   }
@@ -667,8 +655,6 @@ public final class ZenClientMod implements ClientModInitializer {
     int centerX = client.getWindow().getGuiScaledWidth() / 2;
     int centerY = client.getWindow().getGuiScaledHeight() / 2;
     double fov = Math.max(40.0D, client.options.fov().get());
-    CameraBasis basis = buildCameraBasis(client.player);
-
     for (int i = 0; i < limit; i++) {
       Entity entity = targets.get(i);
       Vec3 center = entity.getBoundingBox().getCenter();
@@ -676,9 +662,9 @@ public final class ZenClientMod implements ClientModInitializer {
       Vec3 midAnchor = center.add(0.0D, entity.getBbHeight() * 0.15D, 0.0D);
       Vec3 bottomAnchor = center.add(0.0D, -entity.getBbHeight() * 0.5D, 0.0D);
 
-      ProjectedPoint projectedMid = projectToHud(client, midAnchor, fov, basis);
-      ProjectedPoint projectedTop = projectToHud(client, topAnchor, fov, basis);
-      ProjectedPoint projectedBottom = projectToHud(client, bottomAnchor, fov, basis);
+      ProjectedPoint projectedMid = projectToHud(client, midAnchor, fov);
+      ProjectedPoint projectedTop = projectToHud(client, topAnchor, fov);
+      ProjectedPoint projectedBottom = projectToHud(client, bottomAnchor, fov);
 
       int x = projectedMid.x;
       int y = projectedMid.y;
@@ -730,48 +716,30 @@ public final class ZenClientMod implements ClientModInitializer {
     return 0xFFD4D4D4;
   }
 
-  private CameraBasis buildCameraBasis(LocalPlayer player) {
-    Vec3 forward = player.getLookAngle().normalize();
-    Vec3 worldUp = new Vec3(0.0D, 1.0D, 0.0D);
-    Vec3 right = worldUp.cross(forward);
-    if (right.lengthSqr() < 0.0001D) {
-      right = new Vec3(1.0D, 0.0D, 0.0D);
-    } else {
-      right = right.normalize();
-    }
-    Vec3 up = forward.cross(right).normalize();
-    return new CameraBasis(right, up, forward);
-  }
-
-  private ProjectedPoint projectToHud(Minecraft client, Vec3 worldPos, double fovDegrees, CameraBasis basis) {
-    Vec3 cameraPos = client.player.getEyePosition();
-    Vec3 relative = worldPos.subtract(cameraPos);
-    double cameraX = relative.dot(basis.right);
-    double cameraY = relative.dot(basis.up);
-    double cameraZ = relative.dot(basis.forward);
-
+  private ProjectedPoint projectToHud(Minecraft client, Vec3 worldPos, double fovDegrees) {
     int width = client.getWindow().getGuiScaledWidth();
     int height = client.getWindow().getGuiScaledHeight();
     int centerX = width / 2;
     int centerY = height / 2;
     int edgeX = 18;
     int edgeY = 18;
-    double aspect = Math.max(1.0D, width / (double) height);
-    double tan = Math.tan(Math.toRadians(fovDegrees) / 2.0D);
-    boolean behind = cameraZ <= 0.05D;
-
-    double ndcX;
-    double ndcY;
-    if (behind) {
-      ndcX = cameraX >= 0.0D ? 1.12D : -1.12D;
-      ndcY = Mth.clamp(-(cameraY / Math.max(1.0D, Math.abs(cameraX) + Math.abs(cameraZ))) * 1.4D, -0.9D, 0.9D);
-    } else {
-      ndcX = (cameraX / (cameraZ * tan)) / aspect;
-      ndcY = -(cameraY / (cameraZ * tan));
+    Vec3 projected = client.gameRenderer.projectPointToScreen(worldPos);
+    if (projected == null || !projected.isFinite()) {
+      return new ProjectedPoint(centerX, centerY, true, true);
     }
 
-    int rawX = centerX + (int) Math.round(ndcX * centerX);
-    int rawY = centerY + (int) Math.round(ndcY * centerY);
+    boolean behind = projected.z < 0.0D;
+    int rawX;
+    int rawY;
+    if (behind) {
+      float yaw = Mth.wrapDegrees((float) (Math.toDegrees(Math.atan2(worldPos.z - client.player.getZ(), worldPos.x - client.player.getX())) - 90.0D));
+      float yawDelta = Mth.wrapDegrees(yaw - client.player.getYRot());
+      rawX = yawDelta >= 0.0F ? width - edgeX : edgeX;
+      rawY = centerY;
+    } else {
+      rawX = (int) Math.round(projected.x);
+      rawY = (int) Math.round(projected.y);
+    }
     int clampedX = Mth.clamp(rawX, edgeX, width - edgeX);
     int clampedY = Mth.clamp(rawY, edgeY, height - edgeY - 24);
     boolean clamped = behind || clampedX != rawX || clampedY != rawY;
