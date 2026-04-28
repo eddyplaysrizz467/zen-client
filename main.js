@@ -311,11 +311,17 @@ function getDiscordActivity(state) {
   const base = { startTimestamp: Math.floor(now / 1000) };
 
   if (currentSession && settings.discordShowPlaying) {
-      const details = `Zen Client - ${currentSession.launchType || "Vanilla"}`;
+      const details = currentSession.serverLabel
+        ? `Playing ${currentSession.serverLabel}`
+        : `Zen Client - ${currentSession.launchType || "Vanilla"}`;
       let stateLine = `Playing ${currentSession.version || ""}`.trim();
       if (currentSession.phase === "loading_peace") stateLine = "Loading peace...";
       if (currentSession.phase === "giving_peace") stateLine = "Giving you peace...";
-      if (currentSession.phase === "enjoy") stateLine = "Enjoy!";
+      if (currentSession.phase === "enjoy") {
+        stateLine = currentSession.serverLabel
+          ? `${currentSession.launchType || "Vanilla"} ${currentSession.version || ""}`.trim()
+          : "Enjoy!";
+      }
       return {
       ...base,
       details,
@@ -329,7 +335,7 @@ function getDiscordActivity(state) {
     return {
       ...base,
       details: "In Zen Client",
-      state: selected ? `Selected: ${selected.username}` : "Choosing an account",
+      state: selected ? `Ready with ${selected.username}` : "Choosing an account",
       instance: false
     };
   }
@@ -339,6 +345,7 @@ function getDiscordActivity(state) {
 
 function updateSessionPhaseFromLog(line) {
   if (!currentSession) return;
+  const raw = String(line || "").trim();
   const text = String(line || "").toLowerCase();
   let next = null;
   if (text.includes("joining server")) {
@@ -354,10 +361,36 @@ function updateSessionPhaseFromLog(line) {
   } else if (text.includes("generating terrain") || text.includes("loading terrain")) {
     next = "giving_peace";
   }
+
+  const serverLabel = parseServerLabelFromLog(raw);
+  if (serverLabel && currentSession.serverLabel !== serverLabel) {
+    currentSession.serverLabel = serverLabel;
+    setDiscordPresence();
+  }
+
   if (next && currentSession.phase !== next) {
     currentSession.phase = next;
     setDiscordPresence();
   }
+}
+
+function parseServerLabelFromLog(line) {
+  const raw = String(line || "").trim();
+  if (!raw) return "";
+
+  const patterns = [
+    /connecting to\s+([a-z0-9._:-]+)/i,
+    /joined server[:\s]+([a-z0-9._:-]+)/i,
+    /joining server[:\s]+([a-z0-9._:-]+)/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = raw.match(pattern);
+    if (!match?.[1]) continue;
+    return match[1].replace(/^https?:\/\//i, "");
+  }
+
+  return "";
 }
 
 async function setDiscordPresence() {
@@ -1077,7 +1110,8 @@ async function launchGame(settings) {
     launchType: selectedType,
     version: selectedVersion,
     username: account.username,
-    phase: null
+    phase: null,
+    serverLabel: ""
   };
   setDiscordPresence();
 
