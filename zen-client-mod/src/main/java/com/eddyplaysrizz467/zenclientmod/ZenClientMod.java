@@ -596,16 +596,17 @@ public final class ZenClientMod implements ClientModInitializer {
   }
 
   private boolean matchesEspTarget(Entity entity) {
+    Minecraft client = Minecraft.getInstance();
     for (ZenEspTarget target : CONFIG.orderedEspTargets()) {
-      if (matchesEspTarget(target, entity)) return true;
+      if (matchesEspTarget(client, target, entity)) return true;
     }
     return false;
   }
 
-  private boolean matchesEspTarget(ZenEspTarget target, Entity entity) {
+  private boolean matchesEspTarget(Minecraft client, ZenEspTarget target, Entity entity) {
     String typeName = entity.getType().toString().toLowerCase(Locale.ROOT);
     return switch (target) {
-      case PLAYERS -> entity instanceof Player;
+      case PLAYERS -> entity instanceof Player other && isFriendlyPlayer(client, other);
       case HOSTILE -> entity instanceof Enemy;
       case PASSIVE -> entity instanceof Animal;
       case VILLAGERS -> typeName.contains("villager") || typeName.contains("trader");
@@ -616,6 +617,12 @@ public final class ZenClientMod implements ClientModInitializer {
       case ENDER_CRYSTALS -> typeName.contains("end_crystal");
       case TAMED -> entity instanceof TamableAnimal tamable && tamable.isTame();
     };
+  }
+
+  private boolean isFriendlyPlayer(Minecraft client, Player other) {
+    if (client == null || client.player == null || other == client.player) return false;
+    if (CONFIG.isFriendlyPlayerAllowed(other.getName().getString())) return true;
+    return client.player.getTeam() != null && client.player.getTeam() == other.getTeam();
   }
 
   private void renderCenterEffects(Minecraft client, GuiGraphics drawContext) {

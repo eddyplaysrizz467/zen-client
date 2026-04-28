@@ -38,6 +38,12 @@ public final class ZenEspScreen extends Screen {
     }
 
     addRenderableWidget(
+      Button.builder(Component.literal("Allies"), button -> this.minecraft.setScreen(new ZenFriendlyPlayersScreen(this)))
+        .bounds((this.width / 2) - 68, this.height - 62, 136, 20)
+        .build()
+    );
+
+    addRenderableWidget(
       Button.builder(Component.literal("Back"), button -> this.minecraft.setScreen(parent))
         .bounds((this.width / 2) - 68, this.height - 34, 136, 20)
         .build()
@@ -59,7 +65,7 @@ public final class ZenEspScreen extends Screen {
     context.fill(panelLeft, panelTop, panelRight, panelTop + 34, 0xE1121212);
     super.render(context, mouseX, mouseY, delta);
     context.drawCenteredString(this.font, this.title, this.width / 2, 28, 0xFFFFFFFF);
-    context.drawCenteredString(this.font, Component.literal("Choose which entities the ESP highlights"), this.width / 2, 46, 0xFF9E9E9E);
+    context.drawCenteredString(this.font, Component.literal("Choose which entities the co-op overlay highlights"), this.width / 2, 46, 0xFF9E9E9E);
   }
 
   @Override

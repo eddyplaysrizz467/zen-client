@@ -1,7 +1,7 @@
 package com.eddyplaysrizz467.zenclientmod;
 
 public enum ZenEspTarget {
-  PLAYERS("players", "Players"),
+  PLAYERS("players", "Friendly Players"),
   HOSTILE("hostile", "Hostile Mobs"),
   PASSIVE("passive", "Passive Mobs"),
   VILLAGERS("villagers", "Villagers"),

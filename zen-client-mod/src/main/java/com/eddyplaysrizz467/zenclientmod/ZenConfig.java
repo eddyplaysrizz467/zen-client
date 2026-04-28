@@ -29,6 +29,7 @@ public final class ZenConfig {
 
   private final LinkedHashSet<String> enabledIds = new LinkedHashSet<>();
   private final LinkedHashSet<String> espTargetIds = new LinkedHashSet<>();
+  private final LinkedHashSet<String> friendlyPlayerNames = new LinkedHashSet<>();
   private String flightModeId = ZenFlightMode.VANILLA.id();
   private double flightSpeed = 1.0D;
   private double aimAssistRange = 4.5D;
@@ -51,6 +52,12 @@ public final class ZenConfig {
         root.getAsJsonArray("espTargets").forEach(element -> {
           ZenEspTarget target = ZenEspTarget.byId(element.getAsString());
           if (target != null) config.espTargetIds.add(target.id());
+        });
+      }
+      if (root.has("friendlyPlayers") && root.get("friendlyPlayers").isJsonArray()) {
+        root.getAsJsonArray("friendlyPlayers").forEach(element -> {
+          String name = element.getAsString().trim();
+          if (!name.isBlank()) config.friendlyPlayerNames.add(name.toLowerCase(java.util.Locale.ROOT));
         });
       }
       if (root.has("flightMode")) {
@@ -80,6 +87,7 @@ public final class ZenConfig {
       JsonObject root = new JsonObject();
       root.add("enabled", GSON.toJsonTree(enabledIds));
       root.add("espTargets", GSON.toJsonTree(espTargetIds));
+      root.add("friendlyPlayers", GSON.toJsonTree(friendlyPlayerNames));
       root.addProperty("flightMode", flightModeId);
       root.addProperty("flightSpeed", flightSpeed);
       root.addProperty("aimAssistRange", aimAssistRange);
@@ -135,6 +143,24 @@ public final class ZenConfig {
       if (target != null) ordered.add(target);
     }
     return ordered;
+  }
+
+  public boolean isFriendlyPlayerAllowed(String playerName) {
+    return friendlyPlayerNames.contains(playerName.toLowerCase(java.util.Locale.ROOT));
+  }
+
+  public void toggleFriendlyPlayerName(String playerName) {
+    String normalized = playerName.toLowerCase(java.util.Locale.ROOT);
+    if (friendlyPlayerNames.remove(normalized)) {
+      save();
+      return;
+    }
+    friendlyPlayerNames.add(normalized);
+    save();
+  }
+
+  public List<String> orderedFriendlyPlayers() {
+    return new ArrayList<>(friendlyPlayerNames);
   }
 
   public ZenFlightMode flightMode() {
