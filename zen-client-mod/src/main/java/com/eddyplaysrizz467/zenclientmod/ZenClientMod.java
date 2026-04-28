@@ -50,6 +50,7 @@ public final class ZenClientMod implements ClientModInitializer {
   private static final long AIM_ASSIST_TARGET_MS = 7000L;
   private static final long DAMAGE_TRACK_MS = 2500L;
   private static final int FULLBRIGHT_NIGHT_VISION_DURATION = 1_000_000;
+  private static final int MIN_SAFE_SIMULATION_DISTANCE = 5;
   private static final int HUD_BOX_PADDING = 4;
   private static final int HUD_BOX_HEIGHT = 18;
   private static final int HUD_BOX_GAP = 4;
@@ -456,7 +457,7 @@ public final class ZenClientMod implements ClientModInitializer {
     Boolean targetVsync = null;
 
     if (CONFIG.isEnabled(ZenFeature.PURE_FPS)) {
-      targetSimulationDistance = 4;
+      targetSimulationDistance = MIN_SAFE_SIMULATION_DISTANCE;
       targetEntityDistanceScaling = 0.5D;
       targetMipmapLevels = 0;
       targetAo = false;
@@ -471,7 +472,10 @@ public final class ZenClientMod implements ClientModInitializer {
     boolean veryLowFps = currentFps > 0 && currentFps <= 35;
 
     if (veryHighPing || veryLowFps) {
-      targetSimulationDistance = targetSimulationDistance < 0 ? 4 : Math.min(targetSimulationDistance, 4);
+      targetSimulationDistance =
+        targetSimulationDistance < 0
+          ? MIN_SAFE_SIMULATION_DISTANCE
+          : Math.min(targetSimulationDistance, MIN_SAFE_SIMULATION_DISTANCE);
       targetEntityDistanceScaling = targetEntityDistanceScaling < 0.0D ? 0.55D : Math.min(targetEntityDistanceScaling, 0.55D);
       targetMipmapLevels = targetMipmapLevels < 0 ? 0 : Math.min(targetMipmapLevels, 0);
       targetAo = false;
@@ -501,13 +505,15 @@ public final class ZenClientMod implements ClientModInitializer {
         performanceProfileApplied = true;
       }
 
-      if (targetSimulationDistance >= 0) client.options.simulationDistance().set(targetSimulationDistance);
+      if (targetSimulationDistance >= 0) {
+        client.options.simulationDistance().set(Math.max(MIN_SAFE_SIMULATION_DISTANCE, targetSimulationDistance));
+      }
       if (targetEntityDistanceScaling >= 0.0D) client.options.entityDistanceScaling().set(targetEntityDistanceScaling);
       if (targetMipmapLevels >= 0) client.options.mipmapLevels().set(targetMipmapLevels);
       if (targetAo != null) client.options.ambientOcclusion().set(targetAo);
       if (targetVsync != null) client.options.enableVsync().set(targetVsync);
     } else if (performanceProfileApplied) {
-      client.options.simulationDistance().set(previousSimulationDistance);
+      client.options.simulationDistance().set(Math.max(MIN_SAFE_SIMULATION_DISTANCE, previousSimulationDistance));
       client.options.entityDistanceScaling().set(previousEntityDistanceScaling);
       client.options.mipmapLevels().set(previousMipmapLevels);
       client.options.ambientOcclusion().set(previousAo);
