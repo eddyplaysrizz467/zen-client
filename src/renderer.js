@@ -128,12 +128,18 @@ function randomBetween(min, max) {
   return min + Math.random() * (max - min);
 }
 
+function pickBambooLeftPercent() {
+  const lane = Math.random() < 0.5 ? "left" : "right";
+  if (lane === "left") return randomBetween(2, 13);
+  return randomBetween(87, 97);
+}
+
 function createBambooStalk(id) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "bamboo-stalk";
   button.dataset.id = String(id);
-  button.style.left = `${randomBetween(8, 88)}%`;
+  button.style.left = `${pickBambooLeftPercent()}%`;
   button.style.height = `${Math.round(randomBetween(180, 260))}px`;
   button.style.opacity = String(randomBetween(0.76, 0.98));
   button.innerHTML = `
