@@ -337,6 +337,10 @@ body {
 .app-shell.ready {
   opacity: 1;
   transform: translateY(0) scale(1);
+  pointer-events: none;
+}
+
+.app-shell > * {
   pointer-events: auto;
 }
 
@@ -471,6 +475,10 @@ body {
 .tab-panel.active {
   opacity: 1;
   transform: translateY(0) scale(1);
+  pointer-events: none;
+}
+
+.tab-panel.active > * {
   pointer-events: auto;
 }
 
@@ -490,6 +498,7 @@ body {
   position: relative;
   flex: 1;
   min-height: 0;
+  pointer-events: none;
 }
 
 .card {
@@ -900,6 +909,12 @@ input::placeholder {
   flex-direction: column;
   gap: 0.65rem;
   border: var(--border-soft);
+}
+
+.skin-upload-meta {
+  color: var(--text-mute);
+  font-size: 0.9rem;
+  line-height: 1.4;
 }
 
 @media (max-width: 1100px) {

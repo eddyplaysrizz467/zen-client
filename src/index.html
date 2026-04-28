@@ -223,7 +223,10 @@
               <div class="library-column">
                 <div class="library-title-row">
                   <div class="library-title">PVP resource packs</div>
-                  <button id="refreshPacksButton" class="ghost" type="button">Refresh</button>
+                  <div class="library-title-actions">
+                    <button id="openPacksFolderButton" class="ghost" type="button">Open packs folder</button>
+                    <button id="refreshPacksButton" class="ghost" type="button">Refresh</button>
+                  </div>
                 </div>
                 <label class="library-search">
                   Search
@@ -259,6 +262,21 @@
                 <div class="action-row">
                   <button id="refreshSkinButton" class="ghost" type="button">Refresh preview</button>
                 </div>
+                <label>
+                  Skin model
+                  <select id="skinVariant" type="select">
+                    <option value="classic">Classic</option>
+                    <option value="slim">Slim</option>
+                  </select>
+                </label>
+                <label>
+                  Skin PNG
+                  <input id="skinFileInput" type="file" accept="image/png" />
+                </label>
+                <div class="action-row">
+                  <button id="uploadSkinButton" class="primary" type="button">Upload skin</button>
+                </div>
+                <div id="skinUploadMeta" class="skin-upload-meta">Choose a PNG skin file to upload for the selected Microsoft account.</div>
                 <div class="hint">Preview uses public skin render services. If your skin just changed, it can take a bit to update.</div>
               </div>
             </div>

@@ -96,7 +96,7 @@ public final class ZenClientMod implements ClientModInitializer {
   private static boolean fovLockApplied = false;
   private static boolean autoJumpApplied = false;
   private static boolean noBobApplied = false;
-  private static boolean pureFpsApplied = false;
+  private static boolean performanceProfileApplied = false;
   private static boolean flightApplied = false;
   private static int hitPulseTicks = 0;
   private static int aimAssistTargetId = -1;
@@ -227,7 +227,7 @@ public final class ZenClientMod implements ClientModInitializer {
     fovLockApplied = false;
     autoJumpApplied = false;
     noBobApplied = false;
-    pureFpsApplied = false;
+    performanceProfileApplied = false;
     flightApplied = false;
     aimAssistTargetId = -1;
     aimAssistTargetExpiresAt = 0L;
@@ -449,30 +449,70 @@ public final class ZenClientMod implements ClientModInitializer {
     if (CONFIG.isEnabled(ZenFeature.ZOOM)) targetFov = 30;
     else if (CONFIG.isEnabled(ZenFeature.FOV_LOCK)) targetFov = 70;
 
+    int targetSimulationDistance = -1;
+    double targetEntityDistanceScaling = -1.0D;
+    int targetMipmapLevels = -1;
+    Boolean targetAo = null;
+    Boolean targetVsync = null;
+
     if (CONFIG.isEnabled(ZenFeature.PURE_FPS)) {
-      if (!pureFpsApplied) {
+      targetSimulationDistance = 4;
+      targetEntityDistanceScaling = 0.5D;
+      targetMipmapLevels = 0;
+      targetAo = false;
+      targetVsync = false;
+    }
+
+    int currentFps = Minecraft.getInstance().getFps();
+    int currentPing = currentPingValue(client);
+    boolean highPing = currentPing >= 180;
+    boolean veryHighPing = currentPing >= 300;
+    boolean lowFps = currentFps > 0 && currentFps <= 55;
+    boolean veryLowFps = currentFps > 0 && currentFps <= 35;
+
+    if (veryHighPing || veryLowFps) {
+      targetSimulationDistance = targetSimulationDistance < 0 ? 4 : Math.min(targetSimulationDistance, 4);
+      targetEntityDistanceScaling = targetEntityDistanceScaling < 0.0D ? 0.55D : Math.min(targetEntityDistanceScaling, 0.55D);
+      targetMipmapLevels = targetMipmapLevels < 0 ? 0 : Math.min(targetMipmapLevels, 0);
+      targetAo = false;
+      targetVsync = false;
+    } else if (highPing || lowFps) {
+      targetSimulationDistance = targetSimulationDistance < 0 ? 6 : Math.min(targetSimulationDistance, 6);
+      targetEntityDistanceScaling = targetEntityDistanceScaling < 0.0D ? 0.72D : Math.min(targetEntityDistanceScaling, 0.72D);
+      targetMipmapLevels = targetMipmapLevels < 0 ? 1 : Math.min(targetMipmapLevels, 1);
+      targetAo = false;
+      targetVsync = false;
+    }
+
+    boolean performanceProfileWanted =
+      targetSimulationDistance >= 0
+        || targetEntityDistanceScaling >= 0.0D
+        || targetMipmapLevels >= 0
+        || targetAo != null
+        || targetVsync != null;
+
+    if (performanceProfileWanted) {
+      if (!performanceProfileApplied) {
         previousSimulationDistance = client.options.simulationDistance().get();
         previousEntityDistanceScaling = client.options.entityDistanceScaling().get();
         previousMipmapLevels = client.options.mipmapLevels().get();
         previousAo = client.options.ambientOcclusion().get();
         previousVsync = client.options.enableVsync().get();
-        pureFpsApplied = true;
+        performanceProfileApplied = true;
       }
 
-      client.options.simulationDistance().set(4);
-      client.options.entityDistanceScaling().set(0.5D);
-      client.options.mipmapLevels().set(0);
-      client.options.ambientOcclusion().set(false);
-      client.options.enableVsync().set(false);
-      client.options.bobView().set(false);
-      if (targetFov == null) targetFov = 70;
-    } else if (pureFpsApplied) {
+      if (targetSimulationDistance >= 0) client.options.simulationDistance().set(targetSimulationDistance);
+      if (targetEntityDistanceScaling >= 0.0D) client.options.entityDistanceScaling().set(targetEntityDistanceScaling);
+      if (targetMipmapLevels >= 0) client.options.mipmapLevels().set(targetMipmapLevels);
+      if (targetAo != null) client.options.ambientOcclusion().set(targetAo);
+      if (targetVsync != null) client.options.enableVsync().set(targetVsync);
+    } else if (performanceProfileApplied) {
       client.options.simulationDistance().set(previousSimulationDistance);
       client.options.entityDistanceScaling().set(previousEntityDistanceScaling);
       client.options.mipmapLevels().set(previousMipmapLevels);
       client.options.ambientOcclusion().set(previousAo);
       client.options.enableVsync().set(previousVsync);
-      pureFpsApplied = false;
+      performanceProfileApplied = false;
     }
 
     if (targetFov != null) {
@@ -968,10 +1008,15 @@ public final class ZenClientMod implements ClientModInitializer {
   }
 
   private String buildPing(Minecraft client) {
-    if (client.getConnection() == null || client.player == null) return "Ping --";
+    int ping = currentPingValue(client);
+    return ping < 0 ? "Ping --" : "Ping " + ping + "ms";
+  }
+
+  private int currentPingValue(Minecraft client) {
+    if (client.getConnection() == null || client.player == null) return -1;
     var info = client.getConnection().getPlayerInfo(client.player.getUUID());
-    if (info == null) return "Ping --";
-    return "Ping " + info.getLatency() + "ms";
+    if (info == null) return -1;
+    return info.getLatency();
   }
 
   private String buildClock(Minecraft client) {

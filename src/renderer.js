@@ -34,6 +34,10 @@ const installMenuPackButton = document.getElementById("installMenuPackButton");
 const skinPreviewBox = document.getElementById("skinPreviewBox");
 const skinPreviewMeta = document.getElementById("skinPreviewMeta");
 const refreshSkinButton = document.getElementById("refreshSkinButton");
+const skinVariant = document.getElementById("skinVariant");
+const skinFileInput = document.getElementById("skinFileInput");
+const uploadSkinButton = document.getElementById("uploadSkinButton");
+const skinUploadMeta = document.getElementById("skinUploadMeta");
 const updateNotice = document.getElementById("updateNotice");
 const updateNoticeText = document.getElementById("updateNoticeText");
 const updateNoticeButton = document.getElementById("updateNoticeButton");
@@ -41,6 +45,7 @@ const updateNoticeButton = document.getElementById("updateNoticeButton");
 const refreshModsButton = document.getElementById("refreshModsButton");
 const refreshPacksButton = document.getElementById("refreshPacksButton");
 const openModsFolderButton = document.getElementById("openModsFolderButton");
+const openPacksFolderButton = document.getElementById("openPacksFolderButton");
 const modsSearch = document.getElementById("modsSearch");
 const packsSearch = document.getElementById("packsSearch");
 const modsList = document.getElementById("modsList");
@@ -65,6 +70,7 @@ let modrinthPacks = [];
 let updateStatus = null;
 let skinRenderNonce = 0;
 const installedLibraryItems = new Set();
+let installedLibraryScan = { mods: [], resourcepacks: [] };
 let bootFinished = false;
 let loadingFinished = false;
 const activeBamboo = new Map();
@@ -79,7 +85,12 @@ function setBusy(nextBusy) {
     refreshVersionsButton,
     launchButton,
     installMenuPackButton,
-    refreshSkinButton
+    refreshSkinButton,
+    uploadSkinButton,
+    openModsFolderButton,
+    openPacksFolderButton,
+    refreshModsButton,
+    refreshPacksButton
   ].forEach((button) => {
     button.disabled = nextBusy;
   });
@@ -342,12 +353,37 @@ function renderUpdateNotice() {
   }
 }
 
+function updateSkinControls() {
+  const selected = getSelectedAccount();
+  const canUpload = Boolean(selected && selected.type === "microsoft");
+
+  uploadSkinButton.disabled = busy || !canUpload;
+  skinVariant.disabled = busy || !canUpload;
+  skinFileInput.disabled = busy || !canUpload;
+
+  if (!selected) {
+    skinUploadMeta.textContent = "Choose an account to refresh or upload a skin.";
+    return;
+  }
+
+  if (!canUpload) {
+    skinUploadMeta.textContent = "Skin changing only works for Microsoft accounts.";
+    return;
+  }
+
+  const picked = skinFileInput.files?.[0]?.name;
+  skinUploadMeta.textContent = picked
+    ? `Ready to upload ${picked} as a ${skinVariant.value} skin.`
+    : "Choose a PNG skin file to upload for the selected Microsoft account.";
+}
+
 async function renderSkinHead() {
   const nonce = ++skinRenderNonce;
   const selected = getSelectedAccount();
   if (!selected) {
     skinPreviewBox.innerHTML = `<div class="empty-state">Select an account to load skin info.</div>`;
     skinPreviewMeta.textContent = "";
+    updateSkinControls();
     return;
   }
 
@@ -369,11 +405,13 @@ async function renderSkinHead() {
   if (!url) {
     skinPreviewBox.innerHTML = `<div class="empty-state">No skin info available for this account.</div>`;
     skinPreviewMeta.textContent = selected.username || "";
+    updateSkinControls();
     return;
   }
 
   skinPreviewBox.innerHTML = `<img alt="Minecraft skin head preview" referrerpolicy="no-referrer" src="${url}" />`;
   skinPreviewMeta.textContent = String(profile?.name || selected.username || "").trim();
+  updateSkinControls();
 }
 
 function normalizeBackgroundPreset(presetValue) {
@@ -421,6 +459,7 @@ function syncFromState(nextState) {
   renderSettings();
   renderHero();
   renderUpdateNotice();
+  updateSkinControls();
 }
 
 function collectSettings() {
@@ -487,6 +526,12 @@ launchType.addEventListener("change", async () => {
 
 [memoryMb, minecraftDirectory, javaPath, backgroundPreset, discordEnabled, discordAppId, discordShowLauncher, discordShowPlaying].forEach((element) => {
   element.addEventListener("change", saveSettings);
+});
+
+minecraftDirectory.addEventListener("change", () => {
+  if (localStorage.getItem("aeroTab") === "library") {
+    ensureLibraryLoaded().catch(() => {});
+  }
 });
 
 minecraftVersion.addEventListener("change", saveSettings);
@@ -556,6 +601,44 @@ installMenuPackButton.addEventListener("click", async () => {
 });
 
 refreshSkinButton.addEventListener("click", () => renderSkinHead());
+skinVariant.addEventListener("change", updateSkinControls);
+skinFileInput.addEventListener("change", updateSkinControls);
+uploadSkinButton.addEventListener("click", async () => {
+  const selected = getSelectedAccount();
+  const file = skinFileInput.files?.[0];
+
+  if (!selected) {
+    statusText.textContent = "Choose an account first.";
+    return;
+  }
+  if (selected.type !== "microsoft") {
+    statusText.textContent = "Skin changing only works for Microsoft accounts.";
+    return;
+  }
+  if (!file) {
+    statusText.textContent = "Choose a PNG skin file first.";
+    return;
+  }
+
+  setBusy(true);
+  statusText.textContent = "Uploading skin...";
+  try {
+    const buffer = await file.arrayBuffer();
+    await window.aeroApi.uploadSkin({
+      variant: skinVariant.value,
+      bytes: Array.from(new Uint8Array(buffer))
+    });
+    skinFileInput.value = "";
+    updateSkinControls();
+    statusText.textContent = "Skin uploaded. Refreshing preview...";
+    await renderSkinHead();
+    statusText.textContent = "Skin uploaded.";
+  } catch (error) {
+    statusText.textContent = `Problem: ${error.message}`;
+  } finally {
+    setBusy(false);
+  }
+});
 updateNoticeButton.addEventListener("click", async () => {
   if (!updateStatus?.action) return;
   updateNoticeButton.disabled = true;
@@ -585,6 +668,38 @@ function libraryInstallKey(item, projectType) {
   const root = String(collectSettings().minecraftDirectory || "").trim().toLowerCase();
   const id = String(item?.project_id || item?.slug || item?.title || "").trim().toLowerCase();
   return `${projectType}:${root}:${id}`;
+}
+
+function normalizeLibraryToken(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\.(jar|zip)$/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function itemLooksInstalled(item, projectType) {
+  const installKey = libraryInstallKey(item, projectType);
+  if (installedLibraryItems.has(installKey)) return true;
+
+  const folderEntries =
+    projectType === "mod" ? installedLibraryScan.mods || [] : installedLibraryScan.resourcepacks || [];
+  if (!folderEntries.length) return false;
+
+  const needles = [item?.slug, item?.project_id, item?.title]
+    .map(normalizeLibraryToken)
+    .filter(Boolean);
+
+  return folderEntries.some((entry) => {
+    const haystack = normalizeLibraryToken(entry);
+    return needles.some((needle) => haystack.includes(needle) || needle.includes(haystack));
+  });
+}
+
+async function refreshInstalledLibraryScan() {
+  installedLibraryScan = await window.aeroApi.scanInstalledLibrary({
+    minecraftDirectory: collectSettings().minecraftDirectory
+  });
 }
 
 function libraryItemCard(item, projectType) {
@@ -618,7 +733,7 @@ function libraryItemCard(item, projectType) {
 
   const installBtn = document.createElement("button");
   const installKey = libraryInstallKey(item, projectType);
-  const installed = installedLibraryItems.has(installKey);
+  const installed = itemLooksInstalled(item, projectType);
   installBtn.className = installed ? "ghost" : "primary";
   installBtn.type = "button";
   installBtn.textContent = installed ? "Installed" : "Install";
@@ -637,10 +752,17 @@ function libraryItemCard(item, projectType) {
         launchType: settings.launchType
       });
       installedLibraryItems.add(installKey);
+      await refreshInstalledLibraryScan();
       installBtn.textContent = "Installed";
       installBtn.disabled = true;
       installBtn.className = "ghost";
       statusText.textContent = `Installed ${item.title || item.slug}.`;
+      renderLibraryList(
+        projectType === "mod" ? modsList : packsList,
+        projectType === "mod" ? modrinthMods : modrinthPacks,
+        projectType === "mod" ? modsSearch.value : packsSearch.value,
+        projectType
+      );
     } catch (error) {
       statusText.textContent = `Problem: ${error.message}`;
     } finally {
@@ -705,6 +827,7 @@ async function ensureLibraryLoaded() {
       modrinthSearch({ projectType: "mod", category: "optimization", limit: 100 }),
       modrinthSearch({ projectType: "resourcepack", category: "pvp", limit: 100 })
     ]);
+    await refreshInstalledLibraryScan();
     modrinthMods = mods;
     modrinthPacks = packs;
     renderLibraryList(modsList, modrinthMods, modsSearch.value, "mod");
@@ -730,6 +853,19 @@ openModsFolderButton.addEventListener("click", async () => {
       kind: "mods"
     });
     statusText.textContent = `Opened mods folder: ${result.path}`;
+  } catch (error) {
+    statusText.textContent = `Problem: ${error.message}`;
+  }
+});
+
+openPacksFolderButton.addEventListener("click", async () => {
+  const settings = collectSettings();
+  try {
+    const result = await window.aeroApi.openFolder({
+      minecraftDirectory: settings.minecraftDirectory,
+      kind: "resourcepacks"
+    });
+    statusText.textContent = `Opened resource packs folder: ${result.path}`;
   } catch (error) {
     statusText.textContent = `Problem: ${error.message}`;
   }

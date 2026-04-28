@@ -62,7 +62,7 @@ function defaultState() {
       minecraftDirectory: DEFAULT_ROOT,
       javaPath: "",
       memoryMb: 4096,
-      backgroundPreset: "ink",
+      backgroundPreset: "bamboo",
       discordPresenceEnabled: true,
       discordAppId: DEFAULT_DISCORD_APP_ID,
       discordShowLauncher: true,
@@ -1222,10 +1222,10 @@ function installAeroMenuResourcePack(minecraftRoot, preset) {
   ensureDir(assetsRoot);
 
   const palette = {
-    coral: { top: "#041826", bottom: "#1d8fab", seed: 12 },
-    deep: { top: "#030b14", bottom: "#0d3a57", seed: 48 },
-    lagoon: { top: "#02223a", bottom: "#2bb3c4", seed: 96 }
-  }[preset] || { top: "#041826", bottom: "#1d8fab", seed: 12 };
+    ink: { top: "#07120c", bottom: "#173224", seed: 12 },
+    stone: { top: "#111515", bottom: "#2d3432", seed: 48 },
+    bamboo: { top: "#112316", bottom: "#46663f", seed: 96 }
+  }[preset] || { top: "#07120c", bottom: "#173224", seed: 12 };
 
   for (let i = 0; i < 6; i++) {
     const png = pngFromPalette(512, 512, palette.top, palette.bottom, palette.seed + i * 17);
@@ -1303,6 +1303,28 @@ ipcMain.handle("shell:openFolder", async (_event, payload) => {
   return { path: targetDir };
 });
 
+ipcMain.handle("library:scanInstalled", async (_event, payload) => {
+  const root = String(payload?.minecraftDirectory || DEFAULT_ROOT).trim() || DEFAULT_ROOT;
+  const modsDir = path.join(root, "mods");
+  const packsDir = path.join(root, "resourcepacks");
+
+  ensureDir(modsDir);
+  ensureDir(packsDir);
+
+  const readNames = (dir) =>
+    fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() || entry.isDirectory())
+      .map((entry) => entry.name);
+
+  return {
+    mods: readNames(modsDir),
+    resourcepacks: readNames(packsDir),
+    modsDir,
+    packsDir
+  };
+});
+
 async function modrinthFetchJson(url) {
   const response = await fetch(url, {
     headers: {
@@ -1339,9 +1361,13 @@ ipcMain.handle("modrinth:install", async (_event, payload) => {
     throw new Error("Switch Launch type to Fabric or Quilt to install mods.");
   }
 
+  if (projectType === "mod" && !minecraftVersion) {
+    throw new Error("Pick a Minecraft version first.");
+  }
+
   const versionsUrl = new URL(`https://api.modrinth.com/v2/project/${encodeURIComponent(projectId)}/version`);
-  versionsUrl.searchParams.set("game_versions", JSON.stringify([minecraftVersion]));
   if (projectType === "mod") {
+    versionsUrl.searchParams.set("game_versions", JSON.stringify([minecraftVersion]));
     versionsUrl.searchParams.set("loaders", JSON.stringify([loader]));
   }
 
@@ -1493,7 +1519,7 @@ ipcMain.handle("skin:upload", async (_event, payload) => {
 ipcMain.handle("resourcepack:installAeroMenu", async (_event, payload) => {
   const state = loadState();
   const root = String(payload?.minecraftDirectory || state.settings.minecraftDirectory || DEFAULT_ROOT);
-  const preset = String(payload?.preset || state.settings.backgroundPreset || "coral");
+  const preset = String(payload?.preset || state.settings.backgroundPreset || "ink");
   ensureDir(root);
   const packRoot = installAeroMenuResourcePack(root, preset);
   appendLog(`[resourcepack] Installed Zen Menu pack at ${packRoot}`);

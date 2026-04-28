@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld("aeroApi", {
   openExternal: (url) => invoke("shell:openExternal", url),
   openFolder: (payload) => invoke("shell:openFolder", payload),
   installModrinth: (payload) => invoke("modrinth:install", payload),
+  scanInstalledLibrary: (payload) => invoke("library:scanInstalled", payload),
   startUpdateDownload: () => invoke("update:startDownload"),
   installUpdateNow: () => invoke("update:installNow"),
   onLog: (handler) => ipcRenderer.on("launcher-log", (_event, payload) => handler(payload)),
