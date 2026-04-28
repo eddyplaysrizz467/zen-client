@@ -1,8 +1,13 @@
 const accountsList = document.getElementById("accountsList");
+const appShell = document.getElementById("appShell");
 const heroHelp = document.getElementById("heroHelp");
 const statusText = document.getElementById("statusText");
 const progressText = document.getElementById("progressText");
 const logBox = document.getElementById("logBox");
+const loadingOverlay = document.getElementById("loadingOverlay");
+const loadingBarFill = document.getElementById("loadingBarFill");
+const bambooField = document.getElementById("bambooField");
+const bambooParticles = document.getElementById("bambooParticles");
 
 const tabLauncher = document.getElementById("tabLauncher");
 const tabSettings = document.getElementById("tabSettings");
@@ -60,6 +65,10 @@ let modrinthPacks = [];
 let updateStatus = null;
 let skinRenderNonce = 0;
 const installedLibraryItems = new Set();
+let bootFinished = false;
+let loadingFinished = false;
+const activeBamboo = new Map();
+const BAMBOO_COUNT = 5;
 
 function setBusy(nextBusy) {
   busy = nextBusy;
@@ -74,6 +83,106 @@ function setBusy(nextBusy) {
   ].forEach((button) => {
     button.disabled = nextBusy;
   });
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function maybeFinishLoading() {
+  if (!bootFinished || !loadingFinished) return;
+  loadingOverlay.classList.add("hidden");
+  appShell.classList.add("ready");
+}
+
+function startLoadingSequence() {
+  const duration = 1000 + Math.floor(Math.random() * 4000);
+  const startedAt = performance.now();
+
+  function tick(now) {
+    const progress = Math.min(1, (now - startedAt) / duration);
+    loadingBarFill.style.width = `${Math.round(progress * 100)}%`;
+    if (progress < 1) {
+      requestAnimationFrame(tick);
+    } else {
+      loadingFinished = true;
+      maybeFinishLoading();
+    }
+  }
+
+  requestAnimationFrame(tick);
+}
+
+function randomBetween(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+function createBambooStalk(id) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "bamboo-stalk";
+  button.dataset.id = String(id);
+  button.style.left = `${randomBetween(8, 88)}%`;
+  button.style.height = `${Math.round(randomBetween(180, 260))}px`;
+  button.style.opacity = String(randomBetween(0.76, 0.98));
+  button.innerHTML = `
+    <span class="bamboo-leaf leaf-left"></span>
+    <span class="bamboo-leaf leaf-right"></span>
+  `;
+
+  button.addEventListener("click", () => breakBamboo(button));
+  activeBamboo.set(id, button);
+  bambooField.appendChild(button);
+}
+
+function spawnBambooParticles(originX, originY) {
+  for (let i = 0; i < 12; i += 1) {
+    const particle = document.createElement("div");
+    particle.className = "bamboo-particle";
+    particle.style.left = `${originX + randomBetween(-18, 18)}px`;
+    particle.style.top = `${originY + randomBetween(-12, 12)}px`;
+    particle.style.setProperty("--drift-x", `${randomBetween(-48, 48)}px`);
+    particle.style.setProperty("--drift-y", `${randomBetween(70, 170)}px`);
+    particle.style.setProperty("--spin", `${randomBetween(-220, 220)}deg`);
+    particle.style.width = `${randomBetween(4, 8)}px`;
+    particle.style.height = `${randomBetween(10, 20)}px`;
+    bambooParticles.appendChild(particle);
+    setTimeout(() => particle.remove(), 1900);
+  }
+}
+
+function respawnBamboo(oldId) {
+  activeBamboo.delete(oldId);
+  createBambooStalk(oldId);
+}
+
+async function breakBamboo(button) {
+  if (!button || button.classList.contains("breaking")) return;
+
+  const angleClass = Math.random() < 0.5 ? "angle-a" : "angle-b";
+  const fallAngle = angleClass === "angle-a" ? "45deg" : "125deg";
+  const rect = button.getBoundingClientRect();
+  button.classList.add("breaking", angleClass);
+  button.style.setProperty("--fall-angle", fallAngle);
+  spawnBambooParticles(rect.left + rect.width / 2, rect.top + rect.height / 3);
+
+  await delay(700);
+  button.classList.add("falling-out");
+
+  const id = Number(button.dataset.id || 0);
+  setTimeout(() => {
+    button.remove();
+    respawnBamboo(id);
+  }, 2000);
+}
+
+function seedBambooField() {
+  bambooField.innerHTML = "";
+  bambooParticles.innerHTML = "";
+  activeBamboo.clear();
+  for (let i = 0; i < BAMBOO_COUNT; i += 1) {
+    createBambooStalk(i);
+  }
 }
 
 function loaderKey(value) {
@@ -359,6 +468,7 @@ function setActiveTab(tabName) {
     const active = name === tabName;
     button.classList.toggle("active", active);
     panel.classList.toggle("active", active);
+    panel.setAttribute("aria-hidden", active ? "false" : "true");
   });
   localStorage.setItem("aeroTab", tabName);
   if (tabName === "skins") renderSkinHead();
@@ -676,11 +786,15 @@ window.aeroApi.onClosed(({ code }) => {
 });
 
 async function boot() {
+  startLoadingSequence();
+  seedBambooField();
   state = await window.aeroApi.getState();
   syncFromState(state);
   setActiveTab(localStorage.getItem("aeroTab") || "launcher");
   await refreshVersions();
   if (localStorage.getItem("aeroTab") === "skins") renderSkinHead();
+  bootFinished = true;
+  maybeFinishLoading();
 }
 
 boot().catch((error) => {

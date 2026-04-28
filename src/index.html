@@ -7,12 +7,34 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="scene">
-      <div class="zen-moon"></div>
-      <div class="zen-tree" aria-hidden="true"></div>
+    <div id="loadingOverlay" class="loading-overlay" aria-live="polite">
+      <div class="loading-card">
+        <div class="loading-mark" aria-hidden="true"></div>
+        <div class="loading-title">Loading...</div>
+        <div class="loading-copy">Preparing your calm little corner.</div>
+        <div class="loading-bar"><div id="loadingBarFill" class="loading-bar-fill"></div></div>
+      </div>
     </div>
 
-    <main class="app-shell">
+    <div class="scene">
+      <div class="scene-glow"></div>
+      <div class="palm palm-left" aria-hidden="true">
+        <span class="palm-trunk"></span>
+        <span class="palm-leaf leaf-a"></span>
+        <span class="palm-leaf leaf-b"></span>
+        <span class="palm-leaf leaf-c"></span>
+      </div>
+      <div class="palm palm-right" aria-hidden="true">
+        <span class="palm-trunk"></span>
+        <span class="palm-leaf leaf-a"></span>
+        <span class="palm-leaf leaf-b"></span>
+        <span class="palm-leaf leaf-c"></span>
+      </div>
+      <div id="bambooField" class="bamboo-field" aria-hidden="true"></div>
+      <div id="bambooParticles" class="bamboo-particles" aria-hidden="true"></div>
+    </div>
+
+    <main id="appShell" class="app-shell">
       <header class="hero">
         <div class="brand">
           <div class="zen-logo" aria-hidden="true"></div>
@@ -31,215 +53,218 @@
         <button id="tabSkins" class="tab-button" type="button">Skins</button>
       </nav>
 
-      <section id="panelLauncher" class="layout tab-panel active" aria-label="Launcher panel">
-        <aside class="card accounts-card">
-          <div class="card-head">
-            <h2>Accounts</h2>
-            <p>Use a Microsoft account for real online sign-in, or make an offline profile for local play/testing.</p>
-          </div>
-
-          <div class="action-row">
-            <button id="microsoftButton" class="primary">Sign in with Microsoft</button>
-            <button id="removeAccountButton" class="ghost">Remove selected</button>
-          </div>
-
-          <div id="accountsList" class="accounts-list"></div>
-
-          <div class="offline-form">
-            <h3>Quick offline profile</h3>
-            <label>
-              Username
-              <input id="offlineUsername" type="text" placeholder="Your in-game name" />
-            </label>
-            <label>
-              UUID (optional)
-              <input id="offlineUuid" type="text" placeholder="Leave blank to auto-create one" />
-            </label>
-            <button id="offlineButton" class="ghost wide">Add offline account</button>
-          </div>
-        </aside>
-
-        <section class="card launch-card">
-          <div class="card-head">
-            <h2>Launch</h2>
-            <p>Pick your loader, version, and memory. Zen Client will save your choices and try to use the right Java automatically.</p>
-          </div>
-
-          <div id="updateNotice" class="update-notice" hidden>
-            <div class="update-copy">
-              <div class="update-title">Zen Client update</div>
-              <div id="updateNoticeText" class="update-text"></div>
+      <div class="panel-stage">
+        <section id="panelLauncher" class="layout tab-panel active" aria-label="Launcher panel">
+          <aside class="card accounts-card">
+            <div class="card-head">
+              <h2>Accounts</h2>
+              <p>Use a Microsoft account for real online sign-in, or make an offline profile for local play/testing.</p>
             </div>
-            <button id="updateNoticeButton" class="primary" type="button" hidden>Yes</button>
-          </div>
 
-          <div class="settings-grid">
-            <label>
-              Launch type
-              <select id="launchType">
-                <option>Vanilla</option>
-                <option>Fabric</option>
-                <option>Quilt</option>
-              </select>
-            </label>
+            <div class="action-row">
+              <button id="microsoftButton" class="primary">Sign in with Microsoft</button>
+              <button id="removeAccountButton" class="ghost">Remove selected</button>
+            </div>
 
-            <label>
-              Minecraft version
-              <select id="minecraftVersion"></select>
-            </label>
+            <div id="accountsList" class="accounts-list"></div>
 
-            <label>
-              Memory (MB)
-              <input id="memoryMb" type="number" min="1024" step="256" />
-            </label>
+            <div class="offline-form">
+              <h3>Quick offline profile</h3>
+              <label>
+                Username
+                <input id="offlineUsername" type="text" placeholder="Your in-game name" />
+              </label>
+              <label>
+                UUID (optional)
+                <input id="offlineUuid" type="text" placeholder="Leave blank to auto-create one" />
+              </label>
+              <button id="offlineButton" class="ghost wide">Add offline account</button>
+            </div>
+          </aside>
 
-            <label class="span-two">
-              Minecraft folder
-              <input id="minecraftDirectory" type="text" />
-            </label>
+          <section class="card launch-card">
+            <div class="card-head">
+              <h2>Launch</h2>
+              <p>Pick your loader, version, and memory. Zen Client will save your choices and try to use the right Java automatically.</p>
+            </div>
 
-            <label>
-              Custom Java path (optional)
-              <input id="javaPath" type="text" placeholder="Leave blank to auto-find Java" />
-            </label>
-          </div>
+            <div id="updateNotice" class="update-notice" hidden>
+              <div class="update-copy">
+                <div class="update-title">Zen Client update</div>
+                <div id="updateNoticeText" class="update-text"></div>
+              </div>
+              <button id="updateNoticeButton" class="primary" type="button" hidden>Yes</button>
+            </div>
 
-          <div class="action-row launch-row">
-            <button id="refreshVersionsButton" class="ghost">Refresh versions</button>
-            <button id="launchButton" class="primary">Launch Minecraft</button>
-          </div>
+            <div class="settings-grid">
+              <label>
+                Launch type
+                <select id="launchType">
+                  <option>Vanilla</option>
+                  <option>Fabric</option>
+                  <option>Quilt</option>
+                </select>
+              </label>
 
-          <div class="status-card">
-            <div id="statusText" class="status-text">Loading launcher state...</div>
-            <div id="progressText" class="progress-text"></div>
-            <pre id="logBox" class="log-box"></pre>
+              <label>
+                Minecraft version
+                <select id="minecraftVersion"></select>
+              </label>
+
+              <label>
+                Memory (MB)
+                <input id="memoryMb" type="number" min="1024" step="256" />
+              </label>
+
+              <label class="span-two">
+                Minecraft folder
+                <input id="minecraftDirectory" type="text" />
+              </label>
+
+              <label>
+                Custom Java path (optional)
+                <input id="javaPath" type="text" placeholder="Leave blank to auto-find Java" />
+              </label>
+            </div>
+
+            <div class="action-row launch-row">
+              <button id="refreshVersionsButton" class="ghost">Refresh versions</button>
+              <button id="launchButton" class="primary">Launch Minecraft</button>
+            </div>
+
+            <div class="status-card">
+              <div id="statusText" class="status-text">Loading launcher state...</div>
+              <div id="progressText" class="progress-text"></div>
+              <pre id="logBox" class="log-box"></pre>
+            </div>
+          </section>
+        </section>
+
+        <section id="panelSettings" class="tab-panel" aria-label="Settings panel">
+          <div class="card settings-card">
+            <div class="card-head">
+              <h2>Settings</h2>
+              <p>Customize the look, Discord Rich Presence, and optional Zen-themed main menu pack.</p>
+            </div>
+
+            <div class="settings-grid settings-grid-wide">
+              <label>
+                Background preset
+                <select id="backgroundPreset">
+                  <option value="ink">Ink Night</option>
+                  <option value="stone">Stone Mist</option>
+                  <option value="bamboo">Bamboo Glow</option>
+                </select>
+              </label>
+
+              <label>
+                Discord Rich Presence
+                <select id="discordEnabled">
+                  <option value="off">Off</option>
+                  <option value="on">On</option>
+                </select>
+              </label>
+
+              <label>
+                Discord App ID (optional)
+                <input id="discordAppId" type="text" placeholder="Needed to show Rich Presence in Discord" />
+              </label>
+
+              <label>
+                Show launcher status
+                <select id="discordShowLauncher">
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
+
+              <label>
+                Show playing status
+                <select id="discordShowPlaying">
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="action-row">
+              <button id="installMenuPackButton" class="ghost">Install Zen main menu pack</button>
+              <div class="hint">This installs a small resource pack that changes the Minecraft title background. Enable it inside Minecraft Resource Packs.</div>
+            </div>
           </div>
         </section>
-      </section>
 
-      <section id="panelSettings" class="tab-panel" aria-label="Settings panel">
-        <div class="card settings-card">
-          <div class="card-head">
-            <h2>Settings</h2>
-            <p>Customize the look, Discord Rich Presence, and optional Zen-themed main menu pack.</p>
-          </div>
+        <section id="panelLibrary" class="tab-panel" aria-label="Mods and packs panel">
+          <div class="card library-card">
+            <div class="card-head">
+              <h2>Mods & Packs</h2>
+              <p>Browse popular performance mods and PVP resource packs, then install them into your selected Minecraft folder.</p>
+            </div>
 
-          <div class="settings-grid settings-grid-wide">
-            <label>
-              Background preset
-              <select id="backgroundPreset">
-                <option value="ink">Ink Night</option>
-                <option value="stone">Stone Mist</option>
-                <option value="bamboo">Bamboo Glow</option>
-              </select>
-            </label>
+            <div class="library-grid">
+              <div class="library-column">
+                <div class="library-title-row">
+                  <div class="library-title">Performance mods</div>
+                  <div class="library-title-actions">
+                    <button id="openModsFolderButton" class="ghost" type="button">Open mods folder</button>
+                    <button id="refreshModsButton" class="ghost" type="button">Refresh</button>
+                  </div>
+                </div>
 
-            <label>
-              Discord Rich Presence
-              <select id="discordEnabled">
-                <option value="off">Off</option>
-                <option value="on">On</option>
-              </select>
-            </label>
-
-            <label>
-              Discord App ID (optional)
-              <input id="discordAppId" type="text" placeholder="Needed to show Rich Presence in Discord" />
-            </label>
-
-            <label>
-              Show launcher status
-              <select id="discordShowLauncher">
-                <option value="on">On</option>
-                <option value="off">Off</option>
-              </select>
-            </label>
-
-            <label>
-              Show playing status
-              <select id="discordShowPlaying">
-                <option value="on">On</option>
-                <option value="off">Off</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="action-row">
-            <button id="installMenuPackButton" class="ghost">Install Zen main menu pack</button>
-            <div class="hint">This installs a small resource pack that changes the Minecraft title background. Enable it inside Minecraft Resource Packs.</div>
-          </div>
-        </div>
-      </section>
-
-      <section id="panelLibrary" class="tab-panel" aria-label="Mods and packs panel">
-        <div class="card library-card">
-          <div class="card-head">
-            <h2>Mods & Packs</h2>
-            <p>Browse popular performance mods and PVP resource packs, then install them into your selected Minecraft folder.</p>
-          </div>
-
-          <div class="library-grid">
-            <div class="library-column">
-              <div class="library-title-row">
-                <div class="library-title">Performance mods</div>
-                <div class="library-title-actions">
-                  <button id="openModsFolderButton" class="ghost" type="button">Open mods folder</button>
-                  <button id="refreshModsButton" class="ghost" type="button">Refresh</button>
+                <label class="library-search">
+                  Search
+                  <input id="modsSearch" type="text" placeholder="Type to filter (client, fps, shader...)" />
+                </label>
+                <div id="modsList" class="library-list">
+                  <div class="empty-state">Loading mods...</div>
                 </div>
               </div>
-              <label class="library-search">
-                Search
-                <input id="modsSearch" type="text" placeholder="Type to filter (client, fps, shader...)" />
-              </label>
-              <div id="modsList" class="library-list">
-                <div class="empty-state">Loading mods...</div>
+
+              <div class="library-column">
+                <div class="library-title-row">
+                  <div class="library-title">PVP resource packs</div>
+                  <button id="refreshPacksButton" class="ghost" type="button">Refresh</button>
+                </div>
+                <label class="library-search">
+                  Search
+                  <input id="packsSearch" type="text" placeholder="Type to filter (sword, low fire, short...)" />
+                </label>
+                <div id="packsList" class="library-list">
+                  <div class="empty-state">Loading resource packs...</div>
+                </div>
               </div>
             </div>
 
-            <div class="library-column">
-              <div class="library-title-row">
-                <div class="library-title">PVP resource packs</div>
-                <button id="refreshPacksButton" class="ghost" type="button">Refresh</button>
+            <div class="hint">Tip: the install buttons use your selected Launch type + Minecraft version for mod compatibility.</div>
+          </div>
+        </section>
+
+        <section id="panelSkins" class="tab-panel" aria-label="Skins panel">
+          <div class="card skins-card">
+            <div class="card-head">
+              <h2>Skins</h2>
+              <p>Shows a quick head preview for the selected account.</p>
+            </div>
+
+            <div class="skins-grid">
+              <div class="skin-preview">
+                <div class="skin-preview-title">Skin head</div>
+                <div id="skinPreviewBox" class="skin-preview-box">
+                  <div class="empty-state">Select an account to load skin info.</div>
+                </div>
+                <div id="skinPreviewMeta" class="skin-preview-meta"></div>
               </div>
-              <label class="library-search">
-                Search
-                <input id="packsSearch" type="text" placeholder="Type to filter (sword, low fire, short...)" />
-              </label>
-              <div id="packsList" class="library-list">
-                <div class="empty-state">Loading resource packs...</div>
+
+              <div class="skin-actions">
+                <div class="action-row">
+                  <button id="refreshSkinButton" class="ghost" type="button">Refresh preview</button>
+                </div>
+                <div class="hint">Preview uses public skin render services. If your skin just changed, it can take a bit to update.</div>
               </div>
             </div>
           </div>
-
-          <div class="hint">Tip: the install buttons use your selected Launch type + Minecraft version for mod compatibility.</div>
-        </div>
-      </section>
-
-      <section id="panelSkins" class="tab-panel" aria-label="Skins panel">
-        <div class="card skins-card">
-          <div class="card-head">
-            <h2>Skins</h2>
-            <p>Shows a quick head preview for the selected account.</p>
-          </div>
-
-          <div class="skins-grid">
-            <div class="skin-preview">
-              <div class="skin-preview-title">Skin head</div>
-              <div id="skinPreviewBox" class="skin-preview-box">
-                <div class="empty-state">Select an account to load skin info.</div>
-              </div>
-              <div id="skinPreviewMeta" class="skin-preview-meta"></div>
-            </div>
-
-            <div class="skin-actions">
-              <div class="action-row">
-                <button id="refreshSkinButton" class="ghost" type="button">Refresh preview</button>
-              </div>
-              <div class="hint">Preview uses public skin render services. If your skin just changed, it can take a bit to update.</div>
-            </div>
-          </div>
-        </div>
-      </section>
+        </section>
+      </div>
     </main>
 
     <script src="./renderer.js"></script>
