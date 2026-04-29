@@ -38,8 +38,6 @@ let currentUpdateState = {
   visible: false
 };
 let autoUpdaterRef = null;
-let allowWindowClose = false;
-
 function ensureDir(target) {
   fs.mkdirSync(target, { recursive: true });
 }
@@ -185,11 +183,11 @@ function sendEvent(channel, payload) {
   }
 }
 
-function hideLauncherWindow() {
+function minimizeLauncherWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try {
-    mainWindow.setSkipTaskbar(true);
-    mainWindow.hide();
+    mainWindow.setSkipTaskbar(false);
+    if (!mainWindow.isMinimized()) mainWindow.minimize();
   } catch {
     // ignore
   }
@@ -274,10 +272,9 @@ function createWindow() {
 
   mainWindow.on("close", (event) => {
     if (process.env.AERO_SMOKE_TEST === "1") return;
-    if (allowWindowClose) return;
     if (currentSession) {
       event.preventDefault();
-      hideLauncherWindow();
+      minimizeLauncherWindow();
     }
   });
 
@@ -1217,8 +1214,8 @@ async function launchGame(settings) {
   };
   setDiscordPresence();
 
-  // Keep the launcher fully hidden while Minecraft is running so it does not interfere with fullscreen input/cursor behavior.
-  hideLauncherWindow();
+  // Keep the launcher minimized while Minecraft is running so it does not interfere with fullscreen input/cursor behavior.
+  minimizeLauncherWindow();
 
   const proc = await launchClient.launch(launchOptions);
   if (!proc) {
