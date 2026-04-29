@@ -50,6 +50,7 @@ public final class ZenClientMod implements ClientModInitializer {
   private static final long AIM_ASSIST_TARGET_MS = 7000L;
   private static final long DAMAGE_TRACK_MS = 2500L;
   private static final int FULLBRIGHT_NIGHT_VISION_DURATION = 1_000_000;
+  private static final int MIN_SAFE_RENDER_DISTANCE = 6;
   private static final int MIN_SAFE_SIMULATION_DISTANCE = 5;
   private static final int HUD_BOX_PADDING = 4;
   private static final int HUD_BOX_HEIGHT = 18;
@@ -82,6 +83,7 @@ public final class ZenClientMod implements ClientModInitializer {
   private static float lastAimAssistPitchApplied = 0.0F;
   private static float previousGamma = 1.0F;
   private static int previousFov = 70;
+  private static int previousRenderDistance = 12;
   private static int previousSimulationDistance = 12;
   private static double previousEntityDistanceScaling = 1.0D;
   private static int previousMipmapLevels = 4;
@@ -451,12 +453,14 @@ public final class ZenClientMod implements ClientModInitializer {
     else if (CONFIG.isEnabled(ZenFeature.FOV_LOCK)) targetFov = 70;
 
     int targetSimulationDistance = -1;
+    int targetRenderDistance = -1;
     double targetEntityDistanceScaling = -1.0D;
     int targetMipmapLevels = -1;
     Boolean targetAo = null;
     Boolean targetVsync = null;
 
     if (CONFIG.isEnabled(ZenFeature.PURE_FPS)) {
+      targetRenderDistance = MIN_SAFE_RENDER_DISTANCE;
       targetSimulationDistance = MIN_SAFE_SIMULATION_DISTANCE;
       targetEntityDistanceScaling = 0.5D;
       targetMipmapLevels = 0;
@@ -468,19 +472,32 @@ public final class ZenClientMod implements ClientModInitializer {
     int currentPing = currentPingValue(client);
     boolean highPing = currentPing >= 180;
     boolean veryHighPing = currentPing >= 300;
-    boolean lowFps = currentFps > 0 && currentFps <= 55;
-    boolean veryLowFps = currentFps > 0 && currentFps <= 35;
+    boolean lowFps = currentFps > 0 && currentFps <= 75;
+    boolean veryLowFps = currentFps > 0 && currentFps <= 55;
+    boolean extremeLowFps = currentFps > 0 && currentFps <= 35;
 
-    if (veryHighPing || veryLowFps) {
+    if (veryHighPing || extremeLowFps) {
+      targetRenderDistance =
+        targetRenderDistance < 0
+          ? MIN_SAFE_RENDER_DISTANCE
+          : Math.min(targetRenderDistance, MIN_SAFE_RENDER_DISTANCE);
       targetSimulationDistance =
         targetSimulationDistance < 0
           ? MIN_SAFE_SIMULATION_DISTANCE
           : Math.min(targetSimulationDistance, MIN_SAFE_SIMULATION_DISTANCE);
-      targetEntityDistanceScaling = targetEntityDistanceScaling < 0.0D ? 0.55D : Math.min(targetEntityDistanceScaling, 0.55D);
+      targetEntityDistanceScaling = targetEntityDistanceScaling < 0.0D ? 0.45D : Math.min(targetEntityDistanceScaling, 0.45D);
+      targetMipmapLevels = targetMipmapLevels < 0 ? 0 : Math.min(targetMipmapLevels, 0);
+      targetAo = false;
+      targetVsync = false;
+    } else if (veryLowFps) {
+      targetRenderDistance = targetRenderDistance < 0 ? 8 : Math.min(targetRenderDistance, 8);
+      targetSimulationDistance = targetSimulationDistance < 0 ? 5 : Math.min(targetSimulationDistance, 5);
+      targetEntityDistanceScaling = targetEntityDistanceScaling < 0.0D ? 0.58D : Math.min(targetEntityDistanceScaling, 0.58D);
       targetMipmapLevels = targetMipmapLevels < 0 ? 0 : Math.min(targetMipmapLevels, 0);
       targetAo = false;
       targetVsync = false;
     } else if (highPing || lowFps) {
+      targetRenderDistance = targetRenderDistance < 0 ? 10 : Math.min(targetRenderDistance, 10);
       targetSimulationDistance = targetSimulationDistance < 0 ? 6 : Math.min(targetSimulationDistance, 6);
       targetEntityDistanceScaling = targetEntityDistanceScaling < 0.0D ? 0.72D : Math.min(targetEntityDistanceScaling, 0.72D);
       targetMipmapLevels = targetMipmapLevels < 0 ? 1 : Math.min(targetMipmapLevels, 1);
@@ -489,7 +506,8 @@ public final class ZenClientMod implements ClientModInitializer {
     }
 
     boolean performanceProfileWanted =
-      targetSimulationDistance >= 0
+      targetRenderDistance >= 0
+        || targetSimulationDistance >= 0
         || targetEntityDistanceScaling >= 0.0D
         || targetMipmapLevels >= 0
         || targetAo != null
@@ -497,6 +515,7 @@ public final class ZenClientMod implements ClientModInitializer {
 
     if (performanceProfileWanted) {
       if (!performanceProfileApplied) {
+        previousRenderDistance = client.options.renderDistance().get();
         previousSimulationDistance = client.options.simulationDistance().get();
         previousEntityDistanceScaling = client.options.entityDistanceScaling().get();
         previousMipmapLevels = client.options.mipmapLevels().get();
@@ -505,6 +524,9 @@ public final class ZenClientMod implements ClientModInitializer {
         performanceProfileApplied = true;
       }
 
+      if (targetRenderDistance >= 0) {
+        client.options.renderDistance().set(Math.max(MIN_SAFE_RENDER_DISTANCE, targetRenderDistance));
+      }
       if (targetSimulationDistance >= 0) {
         client.options.simulationDistance().set(Math.max(MIN_SAFE_SIMULATION_DISTANCE, targetSimulationDistance));
       }
@@ -513,6 +535,7 @@ public final class ZenClientMod implements ClientModInitializer {
       if (targetAo != null) client.options.ambientOcclusion().set(targetAo);
       if (targetVsync != null) client.options.enableVsync().set(targetVsync);
     } else if (performanceProfileApplied) {
+      client.options.renderDistance().set(Math.max(MIN_SAFE_RENDER_DISTANCE, previousRenderDistance));
       client.options.simulationDistance().set(Math.max(MIN_SAFE_SIMULATION_DISTANCE, previousSimulationDistance));
       client.options.entityDistanceScaling().set(previousEntityDistanceScaling);
       client.options.mipmapLevels().set(previousMipmapLevels);

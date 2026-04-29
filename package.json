@@ -1,6 +1,6 @@
 {
   "name": "zen-client",
-  "version": "1.0.55",
+  "version": "1.0.56",
   "description": "Zen Client Minecraft launcher rebuilt in JavaScript and Electron.",
   "main": "main.js",
   "scripts": {
