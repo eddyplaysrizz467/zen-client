@@ -67,6 +67,9 @@ let busy = false;
 let libraryBusy = false;
 let modrinthMods = [];
 let modrinthPacks = [];
+let modsSearchTimer = null;
+let lastModsQuery = null;
+let packsLoaded = false;
 let updateStatus = null;
 let skinRenderNonce = 0;
 const installedLibraryItems = new Set();
@@ -832,12 +835,14 @@ function renderLibraryList(target, items, query, projectType) {
   filtered.forEach((item) => target.appendChild(libraryItemCard(item, projectType)));
 }
 
-async function modrinthSearch({ projectType, category, limit }) {
+async function modrinthSearch({ projectType, category, query, limit }) {
   const url = new URL("https://api.modrinth.com/v2/search");
   url.searchParams.set("index", "downloads");
   url.searchParams.set("limit", String(limit || 100));
-  url.searchParams.set("query", "");
-  url.searchParams.set("facets", JSON.stringify([[`project_type:${projectType}`], [`categories:${category}`]]));
+  url.searchParams.set("query", String(query || ""));
+  const facets = [[`project_type:${projectType}`]];
+  if (category) facets.push([`categories:${category}`]);
+  url.searchParams.set("facets", JSON.stringify(facets));
 
   const response = await fetch(url.toString());
   if (!response.ok) {
@@ -847,25 +852,45 @@ async function modrinthSearch({ projectType, category, limit }) {
   return Array.isArray(json?.hits) ? json.hits : [];
 }
 
+async function loadModsFromModrinth(query) {
+  const trimmed = String(query || "").trim();
+  if (trimmed) {
+    return modrinthSearch({ projectType: "mod", query: trimmed, limit: 100 });
+  }
+  return modrinthSearch({ projectType: "mod", category: "optimization", limit: 100 });
+}
+
 async function ensureLibraryLoaded() {
   if (libraryBusy) return;
   libraryBusy = true;
   try {
+    const requestedModsQuery = String(modsSearch.value || "").trim();
     modsList.innerHTML = `<div class="empty-state">Loading mods...</div>`;
-    packsList.innerHTML = `<div class="empty-state">Loading resource packs...</div>`;
+    if (!packsLoaded) {
+      packsList.innerHTML = `<div class="empty-state">Loading resource packs...</div>`;
+    }
 
-    const [mods, packs] = await Promise.all([
-      modrinthSearch({ projectType: "mod", category: "optimization", limit: 100 }),
-      modrinthSearch({ projectType: "resourcepack", category: "pvp", limit: 100 })
-    ]);
+    const work = [loadModsFromModrinth(requestedModsQuery)];
+    if (!packsLoaded) {
+      work.push(modrinthSearch({ projectType: "resourcepack", category: "combat", query: "pvp", limit: 100 }));
+    }
+
+    const results = await Promise.all(work);
+    const [mods, packs] = results;
     await refreshInstalledLibraryScan();
     modrinthMods = mods;
-    modrinthPacks = packs;
-    renderLibraryList(modsList, modrinthMods, modsSearch.value, "mod");
+    lastModsQuery = requestedModsQuery;
+    if (!packsLoaded) {
+      modrinthPacks = packs;
+      packsLoaded = true;
+    }
+    renderLibraryList(modsList, modrinthMods, "", "mod");
     renderLibraryList(packsList, modrinthPacks, packsSearch.value, "resourcepack");
   } catch (error) {
     modsList.innerHTML = `<div class="empty-state">Problem loading mods: ${error.message}</div>`;
-    packsList.innerHTML = `<div class="empty-state">Problem loading packs: ${error.message}</div>`;
+    if (!packsLoaded) {
+      packsList.innerHTML = `<div class="empty-state">Problem loading packs: ${error.message}</div>`;
+    }
   } finally {
     libraryBusy = false;
   }
@@ -873,6 +898,7 @@ async function ensureLibraryLoaded() {
 
 refreshModsButton.addEventListener("click", () => {
   modrinthMods = [];
+  lastModsQuery = null;
   ensureLibraryLoaded().catch(() => {});
 });
 
@@ -904,10 +930,32 @@ openPacksFolderButton.addEventListener("click", async () => {
 
 refreshPacksButton.addEventListener("click", () => {
   modrinthPacks = [];
+  packsLoaded = false;
   ensureLibraryLoaded().catch(() => {});
 });
 
-modsSearch.addEventListener("input", () => renderLibraryList(modsList, modrinthMods, modsSearch.value, "mod"));
+modsSearch.addEventListener("input", () => {
+  const query = String(modsSearch.value || "").trim();
+  clearTimeout(modsSearchTimer);
+
+  if (!query) {
+    if (lastModsQuery !== "") {
+      modsList.innerHTML = `<div class="empty-state">Loading popular performance mods...</div>`;
+      modsSearchTimer = setTimeout(() => ensureLibraryLoaded().catch(() => {}), 120);
+      return;
+    }
+    renderLibraryList(modsList, modrinthMods, "", "mod");
+    return;
+  }
+
+  if (query.length < 2) {
+    renderLibraryList(modsList, modrinthMods, query, "mod");
+    return;
+  }
+
+  modsList.innerHTML = `<div class="empty-state">Searching Modrinth for "${query}"...</div>`;
+  modsSearchTimer = setTimeout(() => ensureLibraryLoaded().catch(() => {}), 260);
+});
 packsSearch.addEventListener("input", () => renderLibraryList(packsList, modrinthPacks, packsSearch.value, "resourcepack"));
 
 launchButton.addEventListener("click", async () => {
