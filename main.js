@@ -92,6 +92,111 @@ function resolveInstanceRoot(baseRoot, launchType, minecraftVersion) {
   return root;
 }
 
+function instanceManifestPath(minecraftRoot) {
+  return path.join(minecraftRoot, "zen-modrinth-installs.json");
+}
+
+function readInstanceManifest(minecraftRoot) {
+  try {
+    const target = instanceManifestPath(minecraftRoot);
+    if (!fs.existsSync(target)) return {};
+    const parsed = JSON.parse(fs.readFileSync(target, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeInstanceManifest(minecraftRoot, manifest) {
+  try {
+    ensureDir(minecraftRoot);
+    fs.writeFileSync(instanceManifestPath(minecraftRoot), JSON.stringify(manifest, null, 2), "utf8");
+  } catch {
+    // ignore manifest write failures
+  }
+}
+
+function recordInstalledModrinthFile(minecraftRoot, fileName, meta) {
+  const manifest = readInstanceManifest(minecraftRoot);
+  manifest[fileName] = {
+    ...manifest[fileName],
+    ...meta,
+    recordedAt: new Date().toISOString()
+  };
+  writeInstanceManifest(minecraftRoot, manifest);
+}
+
+function parseMinecraftVersionHints(fileName) {
+  const matches = String(fileName || "").match(/1\.\d+(?:\.\d+)?/g);
+  return Array.from(new Set(matches || []));
+}
+
+function modLooksIncompatible(fileName, selectedVersion, selectedLoader, manifestEntry) {
+  const lower = String(fileName || "").toLowerCase();
+  const loader = String(selectedLoader || "").toLowerCase();
+  const version = String(selectedVersion || "").trim();
+
+  if ((loader === "fabric" || loader === "quilt") && (lower.includes("forge") || lower.includes("neoforge"))) {
+    return "wrong loader";
+  }
+
+  if (manifestEntry?.projectType === "mod") {
+    if (manifestEntry.loader && String(manifestEntry.loader).toLowerCase() !== loader) {
+      return "installed for another loader";
+    }
+    if (manifestEntry.minecraftVersion && String(manifestEntry.minecraftVersion) !== version) {
+      return "installed for another Minecraft version";
+    }
+  }
+
+  const versionHints = parseMinecraftVersionHints(fileName);
+  if (versionHints.length) {
+    const exactMatch = versionHints.includes(version);
+    if (!exactMatch) {
+      const majorMinor = version.split(".").slice(0, 2).join(".");
+      const nearbyMatch = versionHints.some((hint) => hint === majorMinor || hint.startsWith(`${majorMinor}.`));
+      if (!nearbyMatch) {
+        return "filename version mismatch";
+      }
+    }
+  }
+
+  return "";
+}
+
+function auditInstanceMods(minecraftRoot, selectedVersion, selectedLoader) {
+  const modsDir = path.join(minecraftRoot, "mods");
+  ensureDir(modsDir);
+
+  const manifest = readInstanceManifest(minecraftRoot);
+  const disabledDir = path.join(minecraftRoot, "mods-disabled");
+  const quarantined = [];
+
+  for (const entry of fs.readdirSync(modsDir, { withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    if (!entry.name.toLowerCase().endsWith(".jar")) continue;
+
+    const reason = modLooksIncompatible(entry.name, selectedVersion, selectedLoader, manifest[entry.name]);
+    if (!reason) continue;
+
+    ensureDir(disabledDir);
+    const fromPath = path.join(modsDir, entry.name);
+    let toPath = path.join(disabledDir, entry.name);
+    if (fs.existsSync(toPath)) {
+      toPath = path.join(disabledDir, `${Date.now()}-${entry.name}`);
+    }
+    fs.renameSync(fromPath, toPath);
+    quarantined.push({ name: entry.name, reason });
+    delete manifest[entry.name];
+  }
+
+  if (quarantined.length) {
+    writeInstanceManifest(minecraftRoot, manifest);
+  }
+
+  return quarantined;
+}
+
 function pickNewestFile(paths) {
   const candidates = paths
     .filter(Boolean)
@@ -1037,6 +1142,12 @@ async function ensureModrinthMods(minecraftRoot, minecraftVersion, launchType) {
         continue;
       }
       await ensureFile(download.url, target);
+      recordInstalledModrinthFile(minecraftRoot, path.basename(target), {
+        projectType: "mod",
+        loader: selected,
+        minecraftVersion,
+        slug
+      });
       appendLog(`[mods] Installed ${label} -> ${path.basename(target)}`);
     } catch (error) {
       appendLog(`[mods] Failed to install ${label}: ${error?.message || String(error)}`);
@@ -1063,6 +1174,12 @@ async function ensureZenClientDependencies(minecraftRoot, minecraftVersion, laun
         continue;
       }
       await ensureFile(download.url, target);
+      recordInstalledModrinthFile(minecraftRoot, path.basename(target), {
+        projectType: "mod",
+        loader: selected,
+        minecraftVersion,
+        slug: mod.slug
+      });
       appendLog(`[zen-mod] Installed dependency ${mod.label} -> ${path.basename(target)}`);
     } catch (error) {
       appendLog(`[zen-mod] Failed to install dependency ${mod.label}: ${error?.message || String(error)}`);
@@ -1121,6 +1238,12 @@ async function ensureZenClientMod(minecraftRoot, launchType) {
   } catch {
     // ignore timestamp sync failures
   }
+  recordInstalledModrinthFile(minecraftRoot, path.basename(target), {
+    projectType: "mod",
+    loader: selected,
+    minecraftVersion: "",
+    slug: "zen-client-fabric"
+  });
   appendLog(`[zen-mod] Installed bundled Zen Client mod for ${selected} -> ${path.basename(target)}`);
 }
 
@@ -1149,6 +1272,11 @@ async function launchGame(settings) {
     customVersion = await ensureFabricInstall(minecraftRoot, javaPath, selectedVersion);
   } else if (selectedType === "Quilt") {
     customVersion = await ensureQuiltInstall(minecraftRoot, javaPath, selectedVersion);
+  }
+
+  const quarantinedMods = auditInstanceMods(minecraftRoot, selectedVersion, selectedType);
+  for (const item of quarantinedMods) {
+    appendLog(`[mods] Disabled ${item.name} (${item.reason}) -> mods-disabled`);
   }
 
   await ensureZenClientDependencies(minecraftRoot, selectedVersion, selectedType);
@@ -1539,6 +1667,14 @@ ipcMain.handle("modrinth:install", async (_event, payload) => {
   }
   const buffer = Buffer.from(await response.arrayBuffer());
   fs.writeFileSync(outPath, buffer);
+  if (projectType === "mod") {
+    recordInstalledModrinthFile(minecraftRoot, fileName, {
+      projectType,
+      loader,
+      minecraftVersion,
+      projectId
+    });
+  }
   appendLog(`[modrinth] Installed ${fileName}`);
   return { path: outPath, fileName };
 });
