@@ -10,6 +10,7 @@ const { PNG } = require("pngjs");
 
 const APP_NAME = "Zen Client";
 const APP_DIR = path.join(app.getPath("appData"), "ZenClient");
+const CACHE_DIR = path.join(APP_DIR, "cache");
 const STATE_FILE = path.join(APP_DIR, "launcher-state.json");
 const LEGACY_STATE_FILE = path.join(app.getPath("appData"), "AeroClient", "launcher-state.json");
 const DEFAULT_ROOT = path.join(app.getPath("appData"), ".minecraft");
@@ -40,6 +41,35 @@ let autoUpdaterRef = null;
 
 function ensureDir(target) {
   fs.mkdirSync(target, { recursive: true });
+}
+
+function cacheFilePath(key) {
+  const safe = String(key || "default")
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+  return path.join(CACHE_DIR, `${safe || "default"}.json`);
+}
+
+function readCacheEntry(key, maxAgeMs) {
+  try {
+    const target = cacheFilePath(key);
+    if (!fs.existsSync(target)) return null;
+    const stat = fs.statSync(target);
+    if (Date.now() - stat.mtimeMs > maxAgeMs) return null;
+    return JSON.parse(fs.readFileSync(target, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function writeCacheEntry(key, value) {
+  try {
+    ensureDir(CACHE_DIR);
+    fs.writeFileSync(cacheFilePath(key), JSON.stringify(value), "utf8");
+  } catch {
+    // ignore cache write failures
+  }
 }
 
 function sanitizePathSegment(value, fallback = "default") {
@@ -534,11 +564,19 @@ async function fetchJson(url) {
   return response.json();
 }
 
+async function fetchJsonCached(url, cacheKey, maxAgeMs) {
+  const cached = readCacheEntry(cacheKey, maxAgeMs);
+  if (cached) return cached;
+  const fresh = await fetchJson(url);
+  writeCacheEntry(cacheKey, fresh);
+  return fresh;
+}
+
 async function fetchVersions() {
   const [manifest, fabricGames, quiltGames] = await Promise.all([
-    fetchJson("https://launchermeta.mojang.com/mc/game/version_manifest_v2.json"),
-    fetchJson("https://meta.fabricmc.net/v2/versions/game"),
-    fetchJson("https://meta.quiltmc.org/v3/versions/game")
+    fetchJsonCached("https://launchermeta.mojang.com/mc/game/version_manifest_v2.json", "versions-mojang", 30 * 60 * 1000),
+    fetchJsonCached("https://meta.fabricmc.net/v2/versions/game", "versions-fabric-games", 30 * 60 * 1000),
+    fetchJsonCached("https://meta.quiltmc.org/v3/versions/game", "versions-quilt-games", 30 * 60 * 1000)
   ]);
 
   return {
@@ -771,12 +809,20 @@ function spawnLogged(command, args, label) {
 }
 
 async function getLatestFabricLoader(mcVersion) {
-  const loaders = await fetchJson(`https://meta.fabricmc.net/v2/versions/loader/${mcVersion}`);
+  const loaders = await fetchJsonCached(
+    `https://meta.fabricmc.net/v2/versions/loader/${mcVersion}`,
+    `fabric-loader-${mcVersion}`,
+    12 * 60 * 60 * 1000
+  );
   return loaders[0]?.loader?.version;
 }
 
 async function getLatestQuiltLoader(mcVersion) {
-  const loaders = await fetchJson(`https://meta.quiltmc.org/v3/versions/loader/${mcVersion}`);
+  const loaders = await fetchJsonCached(
+    `https://meta.quiltmc.org/v3/versions/loader/${mcVersion}`,
+    `quilt-loader-${mcVersion}`,
+    12 * 60 * 60 * 1000
+  );
   if (Array.isArray(loaders)) {
     return loaders[0]?.loader?.version;
   }
@@ -794,7 +840,11 @@ async function ensureFabricInstall(minecraftRoot, javaPath, minecraftVersion) {
     removeBrokenVersionInstall(minecraftRoot, versionId, "fabric");
   }
 
-  const installers = await fetchJson("https://meta.fabricmc.net/v2/versions/installer");
+  const installers = await fetchJsonCached(
+    "https://meta.fabricmc.net/v2/versions/installer",
+    "fabric-installers",
+    24 * 60 * 60 * 1000
+  );
   const installer = installers.find((item) => item.stable) || installers[0];
   if (!installer?.url) throw new Error("Could not find the Fabric installer.");
 
@@ -827,7 +877,11 @@ async function ensureQuiltInstall(minecraftRoot, javaPath, minecraftVersion) {
     removeBrokenVersionInstall(minecraftRoot, versionId, "quilt");
   }
 
-  const installers = await fetchJson("https://meta.quiltmc.org/v3/versions/installer");
+  const installers = await fetchJsonCached(
+    "https://meta.quiltmc.org/v3/versions/installer",
+    "quilt-installers",
+    24 * 60 * 60 * 1000
+  );
   const installer = installers[0];
   if (!installer?.url) throw new Error("Could not find the Quilt installer.");
 
@@ -904,7 +958,6 @@ const MODRINTH_BASE_MODS = [
 
 // Extra performance/helpful mods (limit 5, as requested). These are optional: we only install them if a compatible version exists.
 const MODRINTH_EXTRA_MODS = [
-  { slug: "fabric-api", label: "Fabric API (dependency for many mods)" },
   { slug: "indium", label: "Indium (Sodium compatibility)" },
   { slug: "krypton", label: "Krypton (network optimizations)" },
   { slug: "starlight", label: "Starlight (lighting performance)" },
