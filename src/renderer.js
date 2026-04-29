@@ -147,7 +147,7 @@ function createBambooStalk(id) {
     <span class="bamboo-leaf leaf-right"></span>
   `;
 
-  button.addEventListener("click", () => breakBamboo(button));
+  button.addEventListener("click", (event) => breakBamboo(button, event));
   activeBamboo.set(id, button);
   bambooField.appendChild(button);
 }
@@ -173,18 +173,35 @@ function respawnBamboo(oldId) {
   createBambooStalk(oldId);
 }
 
-async function breakBamboo(button) {
-  if (!button || button.classList.contains("breaking")) return;
+function createBambooTopFragment(button, rect, snapY, angleClass) {
+  const fragment = document.createElement("div");
+  fragment.className = `bamboo-top-fragment ${angleClass}`;
+  fragment.style.left = `${rect.left}px`;
+  fragment.style.top = `${rect.top}px`;
+  fragment.style.width = `${rect.width}px`;
+  fragment.style.height = `${snapY}px`;
+  fragment.style.opacity = button.style.opacity || "0.92";
+  fragment.innerHTML = button.innerHTML;
+  bambooField.appendChild(fragment);
+  requestAnimationFrame(() => fragment.classList.add("falling"));
+  setTimeout(() => fragment.remove(), 2000);
+}
+
+async function breakBamboo(button, event) {
+  if (!button || button.classList.contains("snapped")) return;
 
   const angleClass = Math.random() < 0.5 ? "angle-a" : "angle-b";
-  const fallAngle = angleClass === "angle-a" ? "45deg" : "125deg";
   const rect = button.getBoundingClientRect();
-  button.classList.add("breaking", angleClass);
-  button.style.setProperty("--fall-angle", fallAngle);
-  spawnBambooParticles(rect.left + rect.width / 2, rect.top + rect.height / 3);
+  const clickY = typeof event?.clientY === "number" ? event.clientY - rect.top : rect.height * 0.42;
+  const snapY = Math.max(56, Math.min(rect.height - 34, clickY));
+  const stumpHeight = Math.max(34, rect.height - snapY);
 
-  await delay(700);
-  button.classList.add("falling-out");
+  createBambooTopFragment(button, rect, snapY, angleClass);
+  button.classList.add("snapped");
+  button.style.height = `${Math.round(stumpHeight)}px`;
+  button.style.opacity = String(Math.max(0.68, Number(button.style.opacity || 0.9) - 0.08));
+  button.innerHTML = "";
+  spawnBambooParticles(rect.left + rect.width / 2, rect.top + snapY);
 
   const id = Number(button.dataset.id || 0);
   setTimeout(() => {
@@ -483,6 +500,15 @@ function collectSettings() {
   };
 }
 
+function collectLibraryContext() {
+  const settings = collectSettings();
+  return {
+    minecraftDirectory: settings.minecraftDirectory,
+    minecraftVersion: settings.minecraftVersion,
+    launchType: settings.launchType
+  };
+}
+
 async function saveSettings() {
   state = await window.aeroApi.saveSettings(collectSettings());
   renderHero();
@@ -671,9 +697,12 @@ function formatDownloads(value) {
 }
 
 function libraryInstallKey(item, projectType) {
-  const root = String(collectSettings().minecraftDirectory || "").trim().toLowerCase();
+  const settings = collectSettings();
+  const root = String(settings.minecraftDirectory || "").trim().toLowerCase();
+  const loader = String(settings.launchType || "").trim().toLowerCase();
+  const version = String(settings.minecraftVersion || "").trim().toLowerCase();
   const id = String(item?.project_id || item?.slug || item?.title || "").trim().toLowerCase();
-  return `${projectType}:${root}:${id}`;
+  return `${projectType}:${root}:${loader}:${version}:${id}`;
 }
 
 function normalizeLibraryToken(value) {
@@ -703,9 +732,7 @@ function itemLooksInstalled(item, projectType) {
 }
 
 async function refreshInstalledLibraryScan() {
-  installedLibraryScan = await window.aeroApi.scanInstalledLibrary({
-    minecraftDirectory: collectSettings().minecraftDirectory
-  });
+  installedLibraryScan = await window.aeroApi.scanInstalledLibrary(collectLibraryContext());
 }
 
 function libraryItemCard(item, projectType) {
@@ -753,9 +780,7 @@ function libraryItemCard(item, projectType) {
       await window.aeroApi.installModrinth({
         projectId: item.project_id,
         projectType,
-        minecraftDirectory: settings.minecraftDirectory,
-        minecraftVersion: settings.minecraftVersion,
-        launchType: settings.launchType
+        ...collectLibraryContext()
       });
       installedLibraryItems.add(installKey);
       await refreshInstalledLibraryScan();
@@ -855,7 +880,7 @@ openModsFolderButton.addEventListener("click", async () => {
   const settings = collectSettings();
   try {
     const result = await window.aeroApi.openFolder({
-      minecraftDirectory: settings.minecraftDirectory,
+      ...collectLibraryContext(),
       kind: "mods"
     });
     statusText.textContent = `Opened mods folder: ${result.path}`;
@@ -868,7 +893,7 @@ openPacksFolderButton.addEventListener("click", async () => {
   const settings = collectSettings();
   try {
     const result = await window.aeroApi.openFolder({
-      minecraftDirectory: settings.minecraftDirectory,
+      ...collectLibraryContext(),
       kind: "resourcepacks"
     });
     statusText.textContent = `Opened resource packs folder: ${result.path}`;

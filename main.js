@@ -42,6 +42,27 @@ function ensureDir(target) {
   fs.mkdirSync(target, { recursive: true });
 }
 
+function sanitizePathSegment(value, fallback = "default") {
+  const cleaned = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return cleaned || fallback;
+}
+
+function resolveInstanceRoot(baseRoot, launchType, minecraftVersion) {
+  const root = String(baseRoot || DEFAULT_ROOT).trim() || DEFAULT_ROOT;
+  const loader = String(launchType || "vanilla").trim().toLowerCase();
+  const version = sanitizePathSegment(minecraftVersion, "latest");
+
+  if (loader === "fabric" || loader === "quilt") {
+    return path.join(root, "zen-instances", loader, version);
+  }
+
+  return root;
+}
+
 function pickNewestFile(paths) {
   const candidates = paths
     .filter(Boolean)
@@ -1026,12 +1047,16 @@ async function launchGame(settings) {
   const account = state.accounts.find((item) => item.id === state.selectedAccountId);
   if (!account) throw new Error("Choose an account first.");
 
-  const minecraftRoot = settings.minecraftDirectory || DEFAULT_ROOT;
+  const baseMinecraftRoot = settings.minecraftDirectory || DEFAULT_ROOT;
+  const minecraftRoot = resolveInstanceRoot(baseMinecraftRoot, settings.launchType, settings.minecraftVersion);
   ensureDir(minecraftRoot);
 
   const authorization = await resolveAuth(account);
-  const javaPath = findJavaExecutable(settings.javaPath, minecraftRoot);
+  const javaPath = findJavaExecutable(settings.javaPath, baseMinecraftRoot);
   appendLog(`[launch] Using Java at ${javaPath}`);
+  if (minecraftRoot !== baseMinecraftRoot) {
+    appendLog(`[launch] Using isolated instance folder ${minecraftRoot}`);
+  }
 
   let customVersion = null;
   const selectedType = settings.launchType || "Vanilla";
@@ -1325,7 +1350,11 @@ ipcMain.handle("shell:openExternal", async (_event, url) => {
 });
 
 ipcMain.handle("shell:openFolder", async (_event, payload) => {
-  const root = String(payload?.minecraftDirectory || DEFAULT_ROOT).trim() || DEFAULT_ROOT;
+  const root = resolveInstanceRoot(
+    payload?.minecraftDirectory || DEFAULT_ROOT,
+    payload?.launchType,
+    payload?.minecraftVersion
+  );
   const kind = String(payload?.kind || "mods").trim().toLowerCase();
   const folderName = kind === "resourcepacks" ? "resourcepacks" : "mods";
   const targetDir = path.join(root, folderName);
@@ -1338,7 +1367,11 @@ ipcMain.handle("shell:openFolder", async (_event, payload) => {
 });
 
 ipcMain.handle("library:scanInstalled", async (_event, payload) => {
-  const root = String(payload?.minecraftDirectory || DEFAULT_ROOT).trim() || DEFAULT_ROOT;
+  const root = resolveInstanceRoot(
+    payload?.minecraftDirectory || DEFAULT_ROOT,
+    payload?.launchType,
+    payload?.minecraftVersion
+  );
   const modsDir = path.join(root, "mods");
   const packsDir = path.join(root, "resourcepacks");
 
@@ -1382,7 +1415,11 @@ function normalizeLoaderForModrinth(launchType) {
 ipcMain.handle("modrinth:install", async (_event, payload) => {
   const projectId = String(payload?.projectId || "").trim();
   const projectType = String(payload?.projectType || "").trim();
-  const minecraftRoot = String(payload?.minecraftDirectory || DEFAULT_ROOT).trim() || DEFAULT_ROOT;
+  const minecraftRoot = resolveInstanceRoot(
+    payload?.minecraftDirectory || DEFAULT_ROOT,
+    payload?.launchType,
+    payload?.minecraftVersion
+  );
   const minecraftVersion = String(payload?.minecraftVersion || "").trim();
   const launchType = String(payload?.launchType || "").trim();
 
