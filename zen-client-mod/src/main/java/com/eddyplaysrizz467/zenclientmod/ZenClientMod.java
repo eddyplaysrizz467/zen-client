@@ -398,8 +398,8 @@ public final class ZenClientMod implements ClientModInitializer {
         previousGamma = client.options.gamma().get().floatValue();
         gammaBoostApplied = true;
       }
-      if (client.options.gamma().get().floatValue() < 16.0F) {
-        client.options.gamma().set(16.0D);
+      if (client.options.gamma().get().floatValue() < 1.0F) {
+        client.options.gamma().set(1.0D);
       }
 
       if (player != null) {
@@ -462,7 +462,6 @@ public final class ZenClientMod implements ClientModInitializer {
     if (CONFIG.isEnabled(ZenFeature.PURE_FPS)) {
       targetRenderDistance = MIN_SAFE_RENDER_DISTANCE;
       targetSimulationDistance = MIN_SAFE_SIMULATION_DISTANCE;
-      targetEntityDistanceScaling = 0.5D;
       targetMipmapLevels = 0;
       targetAo = false;
       targetVsync = false;
@@ -485,21 +484,18 @@ public final class ZenClientMod implements ClientModInitializer {
         targetSimulationDistance < 0
           ? MIN_SAFE_SIMULATION_DISTANCE
           : Math.min(targetSimulationDistance, MIN_SAFE_SIMULATION_DISTANCE);
-      targetEntityDistanceScaling = targetEntityDistanceScaling < 0.0D ? 0.45D : Math.min(targetEntityDistanceScaling, 0.45D);
       targetMipmapLevels = targetMipmapLevels < 0 ? 0 : Math.min(targetMipmapLevels, 0);
       targetAo = false;
       targetVsync = false;
     } else if (veryLowFps) {
       targetRenderDistance = targetRenderDistance < 0 ? 8 : Math.min(targetRenderDistance, 8);
       targetSimulationDistance = targetSimulationDistance < 0 ? 5 : Math.min(targetSimulationDistance, 5);
-      targetEntityDistanceScaling = targetEntityDistanceScaling < 0.0D ? 0.58D : Math.min(targetEntityDistanceScaling, 0.58D);
       targetMipmapLevels = targetMipmapLevels < 0 ? 0 : Math.min(targetMipmapLevels, 0);
       targetAo = false;
       targetVsync = false;
     } else if (highPing || lowFps) {
       targetRenderDistance = targetRenderDistance < 0 ? 10 : Math.min(targetRenderDistance, 10);
       targetSimulationDistance = targetSimulationDistance < 0 ? 6 : Math.min(targetSimulationDistance, 6);
-      targetEntityDistanceScaling = targetEntityDistanceScaling < 0.0D ? 0.72D : Math.min(targetEntityDistanceScaling, 0.72D);
       targetMipmapLevels = targetMipmapLevels < 0 ? 1 : Math.min(targetMipmapLevels, 1);
       targetAo = false;
       targetVsync = false;
