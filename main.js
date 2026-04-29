@@ -38,6 +38,7 @@ let currentUpdateState = {
   visible: false
 };
 let autoUpdaterRef = null;
+let allowWindowClose = false;
 
 function ensureDir(target) {
   fs.mkdirSync(target, { recursive: true });
@@ -184,6 +185,28 @@ function sendEvent(channel, payload) {
   }
 }
 
+function hideLauncherWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.setSkipTaskbar(true);
+    mainWindow.hide();
+  } catch {
+    // ignore
+  }
+}
+
+function restoreLauncherWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.setSkipTaskbar(false);
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  } catch {
+    // ignore
+  }
+}
+
 function zenIconDataUrl() {
   // Concentric circle icon used across launcher branding.
   const svg = `
@@ -248,6 +271,15 @@ function createWindow() {
   } catch {
     // ignore
   }
+
+  mainWindow.on("close", (event) => {
+    if (process.env.AERO_SMOKE_TEST === "1") return;
+    if (allowWindowClose) return;
+    if (currentSession) {
+      event.preventDefault();
+      hideLauncherWindow();
+    }
+  });
 
   mainWindow.loadFile(path.join(__dirname, "src", "index.html"));
 
@@ -1154,15 +1186,7 @@ async function launchGame(settings) {
     sendEvent("launcher-closed", { code });
     currentSession = null;
     setDiscordPresence();
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      try {
-        mainWindow.restore();
-        mainWindow.show();
-        mainWindow.focus();
-      } catch {
-        // ignore
-      }
-    }
+    restoreLauncherWindow();
   });
 
   const launchOptions = {
@@ -1193,14 +1217,8 @@ async function launchGame(settings) {
   };
   setDiscordPresence();
 
-  // Keep the launcher out of the way while Minecraft is running.
-  if (mainWindow && !mainWindow.isDestroyed() && (selectedType === "Fabric" || selectedType === "Quilt")) {
-    try {
-      mainWindow.minimize();
-    } catch {
-      // ignore
-    }
-  }
+  // Keep the launcher fully hidden while Minecraft is running so it does not interfere with fullscreen input/cursor behavior.
+  hideLauncherWindow();
 
   const proc = await launchClient.launch(launchOptions);
   if (!proc) {
@@ -1652,15 +1670,18 @@ ipcMain.handle("resourcepack:installAeroMenu", async (_event, payload) => {
 
 app.whenReady().then(() => {
   ensureDir(APP_DIR);
+  ensureDir(CACHE_DIR);
   ensureDir(INSTALLER_DIR);
   createWindow();
   initAutoUpdater();
   setDiscordPresence();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    else restoreLauncherWindow();
   });
 });
 
 app.on("window-all-closed", () => {
+  if (currentSession) return;
   if (process.platform !== "darwin") app.quit();
 });
