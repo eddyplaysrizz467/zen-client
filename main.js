@@ -140,6 +140,10 @@ function modLooksIncompatible(fileName, selectedVersion, selectedLoader, manifes
     return "wrong loader";
   }
 
+  if (process.platform === "win32" && lower.includes("cwb-fabric")) {
+    return "disabled for safe video mode on Windows";
+  }
+
   if (manifestEntry?.projectType === "mod") {
     if (manifestEntry.loader && String(manifestEntry.loader).toLowerCase() !== loader) {
       return "installed for another loader";
@@ -1358,6 +1362,11 @@ async function launchGame(settings) {
       number: selectedVersion,
       type: "release",
       ...(customVersion ? { custom: customVersion } : {})
+    },
+    window: {
+      width: 1280,
+      height: 720,
+      fullscreen: false
     },
     memory: {
       max: `${settings.memoryMb || 4096}M`,
