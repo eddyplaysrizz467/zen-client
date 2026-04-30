@@ -431,9 +431,9 @@ public final class ZenClientMod implements ClientModInitializer {
         previousAutoJump = client.options.autoJump().get();
         autoJumpApplied = true;
       }
-      client.options.autoJump().set(true);
+      if (!client.options.autoJump().get()) client.options.autoJump().set(true);
     } else if (autoJumpApplied) {
-      client.options.autoJump().set(previousAutoJump);
+      if (client.options.autoJump().get() != previousAutoJump) client.options.autoJump().set(previousAutoJump);
       autoJumpApplied = false;
     }
 
@@ -442,9 +442,9 @@ public final class ZenClientMod implements ClientModInitializer {
         previousBobView = client.options.bobView().get();
         noBobApplied = true;
       }
-      client.options.bobView().set(false);
+      if (client.options.bobView().get()) client.options.bobView().set(false);
     } else if (noBobApplied) {
-      client.options.bobView().set(previousBobView);
+      if (client.options.bobView().get() != previousBobView) client.options.bobView().set(previousBobView);
       noBobApplied = false;
     }
 
@@ -521,22 +521,38 @@ public final class ZenClientMod implements ClientModInitializer {
       }
 
       if (targetRenderDistance >= 0) {
-        client.options.renderDistance().set(Math.max(MIN_SAFE_RENDER_DISTANCE, targetRenderDistance));
+        int nextRenderDistance = Math.max(MIN_SAFE_RENDER_DISTANCE, targetRenderDistance);
+        if (client.options.renderDistance().get() != nextRenderDistance) {
+          client.options.renderDistance().set(nextRenderDistance);
+        }
       }
       if (targetSimulationDistance >= 0) {
-        client.options.simulationDistance().set(Math.max(MIN_SAFE_SIMULATION_DISTANCE, targetSimulationDistance));
+        int nextSimulationDistance = Math.max(MIN_SAFE_SIMULATION_DISTANCE, targetSimulationDistance);
+        if (client.options.simulationDistance().get() != nextSimulationDistance) {
+          client.options.simulationDistance().set(nextSimulationDistance);
+        }
       }
-      if (targetEntityDistanceScaling >= 0.0D) client.options.entityDistanceScaling().set(targetEntityDistanceScaling);
-      if (targetMipmapLevels >= 0) client.options.mipmapLevels().set(targetMipmapLevels);
-      if (targetAo != null) client.options.ambientOcclusion().set(targetAo);
-      if (targetVsync != null) client.options.enableVsync().set(targetVsync);
+      if (targetEntityDistanceScaling >= 0.0D && client.options.entityDistanceScaling().get() != targetEntityDistanceScaling) {
+        client.options.entityDistanceScaling().set(targetEntityDistanceScaling);
+      }
+      if (targetMipmapLevels >= 0 && client.options.mipmapLevels().get() != targetMipmapLevels) {
+        client.options.mipmapLevels().set(targetMipmapLevels);
+      }
+      if (targetAo != null && client.options.ambientOcclusion().get() != targetAo) {
+        client.options.ambientOcclusion().set(targetAo);
+      }
+      if (targetVsync != null && client.options.enableVsync().get() != targetVsync) {
+        client.options.enableVsync().set(targetVsync);
+      }
     } else if (performanceProfileApplied) {
-      client.options.renderDistance().set(Math.max(MIN_SAFE_RENDER_DISTANCE, previousRenderDistance));
-      client.options.simulationDistance().set(Math.max(MIN_SAFE_SIMULATION_DISTANCE, previousSimulationDistance));
-      client.options.entityDistanceScaling().set(previousEntityDistanceScaling);
-      client.options.mipmapLevels().set(previousMipmapLevels);
-      client.options.ambientOcclusion().set(previousAo);
-      client.options.enableVsync().set(previousVsync);
+      int restoreRenderDistance = Math.max(MIN_SAFE_RENDER_DISTANCE, previousRenderDistance);
+      int restoreSimulationDistance = Math.max(MIN_SAFE_SIMULATION_DISTANCE, previousSimulationDistance);
+      if (client.options.renderDistance().get() != restoreRenderDistance) client.options.renderDistance().set(restoreRenderDistance);
+      if (client.options.simulationDistance().get() != restoreSimulationDistance) client.options.simulationDistance().set(restoreSimulationDistance);
+      if (client.options.entityDistanceScaling().get() != previousEntityDistanceScaling) client.options.entityDistanceScaling().set(previousEntityDistanceScaling);
+      if (client.options.mipmapLevels().get() != previousMipmapLevels) client.options.mipmapLevels().set(previousMipmapLevels);
+      if (client.options.ambientOcclusion().get() != previousAo) client.options.ambientOcclusion().set(previousAo);
+      if (client.options.enableVsync().get() != previousVsync) client.options.enableVsync().set(previousVsync);
       performanceProfileApplied = false;
     }
 
@@ -545,9 +561,9 @@ public final class ZenClientMod implements ClientModInitializer {
         previousFov = client.options.fov().get();
         fovLockApplied = true;
       }
-      client.options.fov().set(targetFov);
+      if (client.options.fov().get() != targetFov) client.options.fov().set(targetFov);
     } else if (fovLockApplied) {
-      client.options.fov().set(previousFov);
+      if (client.options.fov().get() != previousFov) client.options.fov().set(previousFov);
       fovLockApplied = false;
     }
   }
