@@ -197,6 +197,39 @@ function auditInstanceMods(minecraftRoot, selectedVersion, selectedLoader) {
   return quarantined;
 }
 
+function ensureSafeVideoMode(minecraftRoot) {
+  const optionsPath = path.join(minecraftRoot, "options.txt");
+  if (!fs.existsSync(optionsPath)) return false;
+
+  const raw = fs.readFileSync(optionsPath, "utf8");
+  const lines = raw.split(/\r?\n/);
+  const desired = new Map([
+    ["fullscreen", "false"],
+    ["overrideWidth", "1280"],
+    ["overrideHeight", "720"],
+    ["startedCleanly", "true"]
+  ]);
+
+  const seen = new Set();
+  const nextLines = lines.map((line) => {
+    const idx = line.indexOf(":");
+    if (idx === -1) return line;
+    const key = line.slice(0, idx);
+    if (!desired.has(key)) return line;
+    seen.add(key);
+    return `${key}:${desired.get(key)}`;
+  });
+
+  for (const [key, value] of desired.entries()) {
+    if (!seen.has(key)) nextLines.push(`${key}:${value}`);
+  }
+
+  const nextRaw = nextLines.join("\n");
+  if (nextRaw === raw) return false;
+  fs.writeFileSync(optionsPath, nextRaw, "utf8");
+  return true;
+}
+
 function pickNewestFile(paths) {
   const candidates = paths
     .filter(Boolean)
@@ -1272,6 +1305,10 @@ async function launchGame(settings) {
     customVersion = await ensureFabricInstall(minecraftRoot, javaPath, selectedVersion);
   } else if (selectedType === "Quilt") {
     customVersion = await ensureQuiltInstall(minecraftRoot, javaPath, selectedVersion);
+  }
+
+  if (ensureSafeVideoMode(minecraftRoot)) {
+    appendLog("[launch] Applied safe video mode (windowed 1280x720) before startup.");
   }
 
   const quarantinedMods = auditInstanceMods(minecraftRoot, selectedVersion, selectedType);
