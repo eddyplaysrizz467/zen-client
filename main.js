@@ -27,6 +27,7 @@ let discordClient = null;
 let discordReady = false;
 let discordConnecting = false;
 let currentSession = null;
+let currentLaunchContext = null;
 let logBuffer = [];
 let updatePollTimer = null;
 let currentUpdateState = {
@@ -232,6 +233,94 @@ function ensureSafeVideoMode(minecraftRoot) {
   if (nextRaw === raw) return false;
   fs.writeFileSync(optionsPath, nextRaw, "utf8");
   return true;
+}
+
+function readTextIfExists(target) {
+  try {
+    if (!target || !fs.existsSync(target)) return "";
+    return fs.readFileSync(target, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function normalizeModHint(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function moveModToDisabled(minecraftRoot, fileName, reason) {
+  const modsDir = path.join(minecraftRoot, "mods");
+  const source = path.join(modsDir, fileName);
+  if (!fs.existsSync(source)) return null;
+
+  const disabledDir = path.join(minecraftRoot, "mods-disabled");
+  ensureDir(disabledDir);
+  let target = path.join(disabledDir, fileName);
+  if (fs.existsSync(target)) {
+    target = path.join(disabledDir, `${Date.now()}-${fileName}`);
+  }
+  fs.renameSync(source, target);
+
+  const manifest = readInstanceManifest(minecraftRoot);
+  delete manifest[fileName];
+  writeInstanceManifest(minecraftRoot, manifest);
+  return { name: fileName, reason };
+}
+
+function findInstalledModJar(modsDir, hint) {
+  if (!hint || !fs.existsSync(modsDir)) return "";
+  const wanted = normalizeModHint(hint);
+  const entries = fs.readdirSync(modsDir).filter((name) => name.toLowerCase().endsWith(".jar"));
+  return entries.find((name) => normalizeModHint(name).includes(wanted)) || "";
+}
+
+function recoverFromLaunchCrash(minecraftRoot, exitCode) {
+  if (!minecraftRoot || !fs.existsSync(minecraftRoot)) return [];
+
+  const crashyExitCodes = new Set([1, 3221225477, -1073741819]);
+  if (!crashyExitCodes.has(Number(exitCode))) return [];
+
+  const latestLog = readTextIfExists(path.join(minecraftRoot, "logs", "latest.log"));
+  const hsErrNames = fs.readdirSync(minecraftRoot).filter((name) => /^hs_err_pid\d+\.log$/i.test(name));
+  const newestHsErr = pickNewestFile(hsErrNames.map((name) => path.join(minecraftRoot, name)));
+  const hsErr = readTextIfExists(newestHsErr);
+  const combined = `${latestLog}\n${hsErr}`;
+  if (!combined.trim()) return [];
+
+  const modsDir = path.join(minecraftRoot, "mods");
+  const recoveries = [];
+  const seen = new Set();
+
+  const queueRecovery = (hint, reason) => {
+    const jar = findInstalledModJar(modsDir, hint);
+    if (!jar) return;
+    const key = jar.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    recoveries.push({ jar, reason });
+  };
+
+  if (/Mod meteor-client added a lightmap caching hook/i.test(combined) && /badoptimizations/i.test(combined)) {
+    queueRecovery("badoptimizations", "conflicts with meteor-client startup hooks");
+  }
+  if (/EXCEPTION_ACCESS_VIOLATION/i.test(combined) && /glfw\.dll/i.test(combined) && /iris/i.test(combined)) {
+    queueRecovery("iris", "suspected graphics startup crash");
+  }
+  if (/meteor-client-baritone\.mixins\.json:ComeCommandMixin from mod meteor-client/i.test(combined)) {
+    queueRecovery("meteor-client", "reported startup mixin mismatch");
+  }
+  if (/streak-addon/i.test(combined) && recoveries.some((item) => item.jar.toLowerCase().includes("meteor"))) {
+    queueRecovery("streak-addon", "depends on the removed meteor stack");
+  }
+
+  const moved = [];
+  for (const item of recoveries.slice(0, 2)) {
+    const result = moveModToDisabled(minecraftRoot, item.jar, item.reason);
+    if (result) moved.push(result);
+  }
+  return moved;
 }
 
 function pickNewestFile(paths) {
@@ -1349,7 +1438,12 @@ async function launchGame(settings) {
   });
   launchClient.on("close", (code) => {
     appendLog(`[launch] Minecraft closed with exit code ${code}`);
+    const recovered = recoverFromLaunchCrash(currentLaunchContext?.minecraftRoot, code);
+    for (const item of recovered) {
+      appendLog(`[mods] Removed ${item.name} due to a launch issue (${item.reason}). Please relaunch.`);
+    }
     sendEvent("launcher-closed", { code });
+    currentLaunchContext = null;
     currentSession = null;
     setDiscordPresence();
     restoreLauncherWindow();
@@ -1379,6 +1473,11 @@ async function launchGame(settings) {
   };
 
   appendLog(`[launch] Starting ${selectedType} ${selectedVersion}${customVersion ? ` as ${customVersion}` : ""}`);
+  currentLaunchContext = {
+    minecraftRoot,
+    selectedVersion,
+    selectedType
+  };
   currentSession = {
     launchType: selectedType,
     version: selectedVersion,
@@ -1393,6 +1492,7 @@ async function launchGame(settings) {
 
   const proc = await launchClient.launch(launchOptions);
   if (!proc) {
+    currentLaunchContext = null;
     currentSession = null;
     setDiscordPresence();
     throw new Error("Minecraft did not start. Check the built-in log for the Java or launcher error.");
