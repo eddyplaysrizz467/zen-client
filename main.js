@@ -15,6 +15,9 @@ const STATE_FILE = path.join(APP_DIR, "launcher-state.json");
 const LEGACY_STATE_FILE = path.join(app.getPath("appData"), "AeroClient", "launcher-state.json");
 const DEFAULT_ROOT = path.join(app.getPath("appData"), ".minecraft");
 const INSTALLER_DIR = path.join(APP_DIR, "installers");
+const OPTIMIZATION_DIR = path.join(APP_DIR, "optimizations");
+const OPTIMIZATION_STATE_FILE = path.join(OPTIMIZATION_DIR, "applied.json");
+const OPTIMIZATION_HISTORY_FILE = path.join(OPTIMIZATION_DIR, "history.log");
 const DEFAULT_DISCORD_APP_ID = "1496668054803714058";
 const ZEN_CLIENT_MOD_FILENAME = "zen-client-fabric.jar";
 const ZEN_CLIENT_REQUIRED_MODS = [
@@ -331,6 +334,332 @@ function pickNewestFile(paths) {
   if (!candidates.length) return null;
   candidates.sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
   return candidates[0].path;
+}
+
+function readOptimizationState() {
+  try {
+    if (!fs.existsSync(OPTIMIZATION_STATE_FILE)) return {};
+    const parsed = JSON.parse(fs.readFileSync(OPTIMIZATION_STATE_FILE, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeOptimizationState(state) {
+  ensureDir(OPTIMIZATION_DIR);
+  fs.writeFileSync(OPTIMIZATION_STATE_FILE, JSON.stringify(state, null, 2), "utf8");
+}
+
+function appendOptimizationHistory(entry) {
+  try {
+    ensureDir(OPTIMIZATION_DIR);
+    fs.appendFileSync(OPTIMIZATION_HISTORY_FILE, `${JSON.stringify({ ...entry, timestamp: new Date().toISOString() })}\n`, "utf8");
+  } catch {
+    // ignore optimization history failures
+  }
+}
+
+function optimizationRecordKey(definitionId, minecraftRoot) {
+  return `${definitionId}::${String(minecraftRoot || "").toLowerCase()}`;
+}
+
+function readKeyValueFile(filePath) {
+  if (!fs.existsSync(filePath)) return { lines: [], map: new Map() };
+  const raw = fs.readFileSync(filePath, "utf8");
+  const lines = raw.split(/\r?\n/);
+  const map = new Map();
+  for (const line of lines) {
+    const idx = line.indexOf(":");
+    if (idx === -1) continue;
+    map.set(line.slice(0, idx), line.slice(idx + 1));
+  }
+  return { lines, map };
+}
+
+function writePatchedKeyValueFile(filePath, desiredMap = {}, removedKeys = []) {
+  ensureDir(path.dirname(filePath));
+  const desired = new Map(Object.entries(desiredMap).map(([key, value]) => [String(key), String(value)]));
+  const removals = new Set((removedKeys || []).map((key) => String(key)));
+  const existing = readKeyValueFile(filePath);
+  const seen = new Set();
+  const nextLines = existing.lines.map((line) => {
+    const idx = line.indexOf(":");
+    if (idx === -1) return line;
+    const key = line.slice(0, idx);
+    if (removals.has(key)) {
+      seen.add(key);
+      return null;
+    }
+    if (!desired.has(key)) return line;
+    seen.add(key);
+    return `${key}:${desired.get(key)}`;
+  }).filter((line) => line !== null);
+
+  for (const [key, value] of desired.entries()) {
+    if (!seen.has(key)) nextLines.push(`${key}:${value}`);
+  }
+
+  fs.writeFileSync(filePath, nextLines.join("\n"), "utf8");
+}
+
+function resolveOptimizationRoot(payload) {
+  const state = loadState();
+  const settings = {
+    ...state.settings,
+    ...(payload || {})
+  };
+  const baseRoot = settings.minecraftDirectory || DEFAULT_ROOT;
+  const version = settings.minecraftVersion || state.settings.minecraftVersion || "latest";
+  const launchType = settings.launchType || state.settings.launchType || "Vanilla";
+  return resolveInstanceRoot(baseRoot, launchType, version);
+}
+
+function createOptionOptimization({ id, title, category, key, value, risky = false, riskReason = "", description = "" }) {
+  return {
+    id,
+    title,
+    category,
+    kind: "option",
+    targetFile: "options.txt",
+    desiredValues: { [key]: String(value) },
+    risky,
+    riskReason,
+    description
+  };
+}
+
+function getOptimizationDefinitions() {
+  return [
+    createOptionOptimization({ id: "safe-windowed-startup", title: "Safe windowed startup", category: "Launch", key: "fullscreen", value: "false", description: "Starts Minecraft windowed first to avoid fullscreen handoff issues." }),
+    createOptionOptimization({ id: "safe-window-width", title: "Launch width 1280", category: "Launch", key: "overrideWidth", value: "1280", description: "Uses a safer startup width for the game window." }),
+    createOptionOptimization({ id: "safe-window-height", title: "Launch height 720", category: "Launch", key: "overrideHeight", value: "720", description: "Uses a safer startup height for the game window." }),
+    createOptionOptimization({ id: "started-cleanly-flag", title: "Mark started cleanly", category: "Launch", key: "startedCleanly", value: "true", description: "Stops Minecraft from retrying stale recovery mode on startup." }),
+    createOptionOptimization({ id: "disable-vsync", title: "Disable VSync", category: "Graphics", key: "enableVsync", value: "false", risky: true, riskReason: "Can cause screen tearing on some displays.", description: "Lets the GPU render without waiting for your monitor refresh." }),
+    createOptionOptimization({ id: "render-distance-balanced", title: "Balanced render distance", category: "World", key: "renderDistance", value: "8", risky: true, riskReason: "Lowers how far you can see terrain.", description: "Cuts chunk rendering load without making the world too tiny." }),
+    createOptionOptimization({ id: "simulation-distance-balanced", title: "Balanced simulation distance", category: "World", key: "simulationDistance", value: "5", risky: true, riskReason: "Farther-away entities and redstone update less often.", description: "Reduces the amount of world simulation running around you." }),
+    createOptionOptimization({ id: "entity-distance-medium", title: "Medium entity distance", category: "World", key: "entityDistanceScaling", value: "0.75", risky: true, riskReason: "Far-away entities can pop in later.", description: "Trims entity rendering range for easier GPU work." }),
+    createOptionOptimization({ id: "particles-minimal", title: "Minimal particles", category: "Effects", key: "particles", value: "0", description: "Reduces particle spam for steadier frames." }),
+    createOptionOptimization({ id: "clouds-off", title: "Turn clouds off", category: "Graphics", key: "renderClouds", value: "\"false\"", description: "Disables cloud rendering to remove one background pass." }),
+    createOptionOptimization({ id: "cloud-range-low", title: "Lower cloud range", category: "Graphics", key: "cloudRange", value: "32", risky: true, riskReason: "Clouds may look cut off sooner if you re-enable them.", description: "Keeps cloud draw distance compact." }),
+    createOptionOptimization({ id: "weather-radius-trim", title: "Trim weather radius", category: "Effects", key: "weatherRadius", value: "4", description: "Draws rain and snow in a smaller area around you." }),
+    createOptionOptimization({ id: "smooth-lighting-off", title: "Disable smooth lighting", category: "Graphics", key: "ao", value: "false", risky: true, riskReason: "World shading will look flatter.", description: "Turns ambient occlusion off to simplify block lighting." }),
+    createOptionOptimization({ id: "entity-shadows-off", title: "Disable entity shadows", category: "Graphics", key: "entityShadows", value: "false", description: "Stops rendering dynamic mob and player shadows." }),
+    createOptionOptimization({ id: "mipmaps-off", title: "Disable mipmaps", category: "Textures", key: "mipmapLevels", value: "0", risky: true, riskReason: "Distant textures can shimmer more.", description: "Removes extra texture mip levels to lower VRAM work." }),
+    createOptionOptimization({ id: "anisotropy-low", title: "Low anisotropic filtering", category: "Textures", key: "maxAnisotropyBit", value: "1", risky: true, riskReason: "Angled textures can look less crisp.", description: "Keeps texture filtering light." }),
+    createOptionOptimization({ id: "biome-blend-zero", title: "Disable biome blend", category: "World", key: "biomeBlendRadius", value: "0", risky: true, riskReason: "Biome color transitions will look harsher.", description: "Stops extra biome color smoothing work." }),
+    createOptionOptimization({ id: "chunk-fade-off", title: "Disable chunk fade-in", category: "World", key: "chunkSectionFadeInTime", value: "0.0", description: "Skips chunk fade animations to reduce visual overhead." }),
+    createOptionOptimization({ id: "cutout-leaves-fast", title: "Fast leaf rendering", category: "Graphics", key: "cutoutLeaves", value: "true", description: "Uses simpler leaf rendering where supported." }),
+    createOptionOptimization({ id: "force-unicode-off", title: "Disable force Unicode font", category: "UI", key: "forceUnicodeFont", value: "false", description: "Keeps the lighter default font renderer active." }),
+    createOptionOptimization({ id: "fov-effects-off", title: "Disable FOV effects", category: "Effects", key: "fovEffectScale", value: "0.0", description: "Removes speed/FOV warping so frames feel steadier." }),
+    createOptionOptimization({ id: "darkness-effects-off", title: "Disable darkness effects", category: "Effects", key: "darknessEffectScale", value: "0.0", description: "Removes darkness pulsing and overlay intensity." }),
+    createOptionOptimization({ id: "glint-speed-low", title: "Slow enchant glint", category: "Effects", key: "glintSpeed", value: "0.0", description: "Cuts the animation work for enchantment glint." }),
+    createOptionOptimization({ id: "glint-strength-low", title: "Lower enchant glint strength", category: "Effects", key: "glintStrength", value: "0.25", description: "Makes enchant overlays lighter and cheaper to notice." }),
+    createOptionOptimization({ id: "chunk-updates-prioritized", title: "Prioritize nearby chunk updates", category: "World", key: "prioritizeChunkUpdates", value: "2", risky: true, riskReason: "Far chunks may fill in a little later.", description: "Biases chunk work toward what is closest to you first." }),
+    createOptionOptimization({ id: "frame-cap-144", title: "Cap FPS to 144", category: "Launch", key: "maxFps", value: "144", risky: true, riskReason: "Lowers maximum FPS if your machine can run far higher.", description: "Reduces pointless GPU spikes while staying smooth on common high-refresh displays." }),
+    createOptionOptimization({ id: "transparency-simple", title: "Simpler transparency", category: "Graphics", key: "improvedTransparency", value: "false", description: "Turns off extra transparency handling work." }),
+    createOptionOptimization({ id: "inactive-fps-minimized", title: "Minimize FPS when unfocused", category: "Launch", key: "inactivityFpsLimit", value: "\"minimized\"", description: "Cuts background resource usage when Minecraft is not focused." }),
+    createOptionOptimization({ id: "screen-effects-off", title: "Disable screen effects", category: "Effects", key: "screenEffectScale", value: "0.0", description: "Turns off nausea-style screen effect intensity." }),
+    createOptionOptimization({ id: "auto-jump-off", title: "Disable auto jump", category: "Movement", key: "autoJump", value: "false", description: "Prevents accidental auto-jump calculations and movement quirks." })
+  ];
+}
+
+function getOptimizationDefinition(id) {
+  return getOptimizationDefinitions().find((item) => item.id === id) || null;
+}
+
+function detectOptimizationStatus(definition, minecraftRoot, optimizationState) {
+  const filePath = path.join(minecraftRoot, definition.targetFile);
+  const { map } = readKeyValueFile(filePath);
+  const desiredEntries = Object.entries(definition.desiredValues);
+  const active = desiredEntries.every(([key, value]) => map.get(key) === value);
+  const record = optimizationState[optimizationRecordKey(definition.id, minecraftRoot)] || null;
+  const status = active ? (record ? "applied" : "already-done") : "available";
+  return {
+    ...definition,
+    status,
+    active,
+    record,
+    minecraftRoot
+  };
+}
+
+function listOptimizationStatuses(payload) {
+  const minecraftRoot = resolveOptimizationRoot(payload);
+  ensureDir(minecraftRoot);
+  const optimizationState = readOptimizationState();
+  return getOptimizationDefinitions().map((definition) => detectOptimizationStatus(definition, minecraftRoot, optimizationState));
+}
+
+function applyOptimization(definitionId, payload) {
+  const definition = getOptimizationDefinition(definitionId);
+  if (!definition) throw new Error("Unknown optimization.");
+
+  const minecraftRoot = resolveOptimizationRoot(payload);
+  const filePath = path.join(minecraftRoot, definition.targetFile);
+  const { map } = readKeyValueFile(filePath);
+  const previous = {};
+  for (const [key] of Object.entries(definition.desiredValues)) {
+    previous[key] = map.has(key) ? map.get(key) : null;
+  }
+  writePatchedKeyValueFile(filePath, definition.desiredValues);
+
+  const optimizationState = readOptimizationState();
+  optimizationState[optimizationRecordKey(definition.id, minecraftRoot)] = {
+    id: definition.id,
+    title: definition.title,
+    minecraftRoot,
+    previous,
+    desiredValues: definition.desiredValues,
+    appliedAt: new Date().toISOString()
+  };
+  writeOptimizationState(optimizationState);
+  appendOptimizationHistory({ action: "apply", id: definition.id, title: definition.title, minecraftRoot });
+  return detectOptimizationStatus(definition, minecraftRoot, optimizationState);
+}
+
+function undoOptimization(definitionId, payload) {
+  const definition = getOptimizationDefinition(definitionId);
+  if (!definition) throw new Error("Unknown optimization.");
+
+  const minecraftRoot = resolveOptimizationRoot(payload);
+  const optimizationState = readOptimizationState();
+  const recordKey = optimizationRecordKey(definition.id, minecraftRoot);
+  const record = optimizationState[recordKey];
+  if (!record) return detectOptimizationStatus(definition, minecraftRoot, optimizationState);
+
+  const previous = record.previous || {};
+  const desired = {};
+  const removals = [];
+  for (const [key, value] of Object.entries(previous)) {
+    if (value === null || typeof value === "undefined") removals.push(key);
+    else desired[key] = value;
+  }
+  writePatchedKeyValueFile(path.join(minecraftRoot, definition.targetFile), desired, removals);
+
+  delete optimizationState[recordKey];
+  writeOptimizationState(optimizationState);
+  appendOptimizationHistory({ action: "undo", id: definition.id, title: definition.title, minecraftRoot });
+  return detectOptimizationStatus(definition, minecraftRoot, optimizationState);
+}
+
+function walkDirectory(rootDir, maxDepth = 3, depth = 0, output = []) {
+  if (!rootDir || !fs.existsSync(rootDir) || depth > maxDepth) return output;
+  try {
+    for (const entry of fs.readdirSync(rootDir, { withFileTypes: true })) {
+      const fullPath = path.join(rootDir, entry.name);
+      if (entry.isDirectory()) {
+        walkDirectory(fullPath, maxDepth, depth + 1, output);
+      } else {
+        output.push(fullPath);
+      }
+    }
+  } catch {
+    // ignore inaccessible folders while scanning shortcuts
+  }
+  return output;
+}
+
+function shouldTreatAsGameName(name) {
+  const lower = String(name || "").toLowerCase();
+  if (!lower) return false;
+  if (lower.includes("uninstall") || lower.includes("readme") || lower.includes("setup") || lower.includes("repair")) return false;
+  if (lower.includes("zen client")) return false;
+  return true;
+}
+
+function normalizeGameName(name) {
+  return String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function parseSteamLibraryPaths() {
+  const candidates = [
+    path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Steam", "steamapps", "libraryfolders.vdf"),
+    path.join(process.env.ProgramFiles || "C:\\Program Files", "Steam", "steamapps", "libraryfolders.vdf")
+  ];
+  const filePath = candidates.find((target) => fs.existsSync(target));
+  if (!filePath) return [];
+
+  const raw = fs.readFileSync(filePath, "utf8");
+  const matches = [...raw.matchAll(/"path"\s+"([^"]+)"/g)];
+  return matches.map((match) => match[1].replace(/\\\\/g, "\\"));
+}
+
+function scanSteamGames() {
+  const libraries = parseSteamLibraryPaths();
+  const results = [];
+  for (const library of libraries) {
+    const steamapps = path.join(library, "steamapps");
+    if (!fs.existsSync(steamapps)) continue;
+    const manifests = fs.readdirSync(steamapps).filter((name) => /^appmanifest_\d+\.acf$/i.test(name));
+    for (const manifestName of manifests) {
+      const raw = readTextIfExists(path.join(steamapps, manifestName));
+      const appid = (raw.match(/"appid"\s+"(\d+)"/) || [])[1];
+      const name = (raw.match(/"name"\s+"([^"]+)"/) || [])[1];
+      if (!appid || !name || !shouldTreatAsGameName(name)) continue;
+      results.push({
+        id: `steam:${appid}`,
+        name,
+        source: "Steam",
+        launchKind: "steam",
+        appid
+      });
+    }
+  }
+  return results;
+}
+
+function scanShortcutGames() {
+  const dirs = [
+    path.join(os.homedir(), "Desktop"),
+    path.join("C:\\Users\\Public", "Desktop"),
+    path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs"),
+    path.join(process.env.ProgramData || "C:\\ProgramData", "Microsoft", "Windows", "Start Menu", "Programs")
+  ].filter(Boolean);
+
+  const results = [];
+  for (const dir of dirs) {
+    for (const filePath of walkDirectory(dir, 2)) {
+      const ext = path.extname(filePath).toLowerCase();
+      if (ext !== ".lnk" && ext !== ".url") continue;
+      const name = path.basename(filePath, ext);
+      if (!shouldTreatAsGameName(name)) continue;
+      results.push({
+        id: `shortcut:${filePath}`,
+        name,
+        source: filePath.includes("Desktop") ? "Desktop shortcut" : "Start menu",
+        launchKind: "shortcut",
+        shortcutPath: filePath
+      });
+    }
+  }
+  return results;
+}
+
+function scanInstalledGames() {
+  const seen = new Set();
+  const combined = [...scanSteamGames(), ...scanShortcutGames()];
+  const deduped = [];
+  for (const item of combined) {
+    const key = `${normalizeGameName(item.name)}:${item.source}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+  }
+  return deduped.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function launchInstalledGame(entry) {
+  if (!entry || typeof entry !== "object") throw new Error("Missing game entry.");
+  if (entry.launchKind === "steam" && entry.appid) {
+    await shell.openExternal(`steam://rungameid/${entry.appid}`);
+    return true;
+  }
+  const shortcutPath = String(entry.shortcutPath || "").trim();
+  if (!shortcutPath) throw new Error("Missing shortcut path.");
+  const error = await shell.openPath(shortcutPath);
+  if (error) throw new Error(error);
+  return true;
 }
 
 function defaultState() {
@@ -1734,6 +2063,34 @@ ipcMain.handle("library:scanInstalled", async (_event, payload) => {
   };
 });
 
+ipcMain.handle("games:scan", async () => {
+  const games = scanInstalledGames();
+  appendLog(`[games] Found ${games.length} launchable games on this PC.`);
+  return games;
+});
+
+ipcMain.handle("games:launch", async (_event, payload) => {
+  await launchInstalledGame(payload);
+  appendLog(`[games] Launching ${payload?.name || "game"}...`);
+  return true;
+});
+
+ipcMain.handle("optimizations:list", async (_event, payload) => {
+  return listOptimizationStatuses(payload);
+});
+
+ipcMain.handle("optimizations:apply", async (_event, payload) => {
+  const result = applyOptimization(String(payload?.id || ""), payload);
+  appendLog(`[optimize] Applied ${result.title}.`);
+  return result;
+});
+
+ipcMain.handle("optimizations:undo", async (_event, payload) => {
+  const result = undoOptimization(String(payload?.id || ""), payload);
+  appendLog(`[optimize] Reverted ${result.title}.`);
+  return result;
+});
+
 async function modrinthFetchJson(url) {
   const response = await fetch(url, {
     headers: {
@@ -1951,6 +2308,7 @@ app.whenReady().then(() => {
   ensureDir(APP_DIR);
   ensureDir(CACHE_DIR);
   ensureDir(INSTALLER_DIR);
+  ensureDir(OPTIMIZATION_DIR);
   createWindow();
   initAutoUpdater();
   setDiscordPresence();

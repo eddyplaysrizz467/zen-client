@@ -51,6 +51,8 @@
         <button id="tabSettings" class="tab-button" type="button">Settings</button>
         <button id="tabLibrary" class="tab-button" type="button">Mods & Packs</button>
         <button id="tabSkins" class="tab-button" type="button">Skins</button>
+        <button id="tabGames" class="tab-button" type="button">Games</button>
+        <button id="tabOptimize" class="tab-button" type="button">Optimize</button>
       </nav>
 
       <div class="panel-stage">
@@ -280,6 +282,53 @@
                 <div id="skinUploadMeta" class="skin-upload-meta">Choose a PNG skin file to upload for the selected Microsoft account.</div>
                 <div class="hint">Preview uses public skin render services. If your skin just changed, it can take a bit to update.</div>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="panelGames" class="tab-panel" aria-label="Games panel">
+          <div class="card games-card">
+            <div class="card-head">
+              <h2>Games</h2>
+              <p>Zen Client can scan local shortcuts and Steam manifests so you can launch other installed games without leaving the launcher.</p>
+            </div>
+
+            <div class="library-title-row">
+              <div class="library-title">Detected games</div>
+              <div class="library-title-actions">
+                <button id="refreshGamesButton" class="ghost" type="button">Scan again</button>
+              </div>
+            </div>
+
+            <label class="library-search">
+              Search games
+              <input id="gamesSearch" type="text" placeholder="Type a game name..." />
+            </label>
+
+            <div id="gamesList" class="library-list games-list">
+              <div class="empty-state">No games scanned yet.</div>
+            </div>
+          </div>
+        </section>
+
+        <section id="panelOptimize" class="tab-panel" aria-label="Optimize panel">
+          <div class="card optimize-card">
+            <div class="card-head">
+              <h2>Optimization Center</h2>
+              <p>Thirty tracked optimizations with status checks, risk notes, and undo support. Zen Client remembers what you changed and can tell when something is already done.</p>
+            </div>
+
+            <div class="library-title-row">
+              <div class="library-title">Optimization profile</div>
+              <div class="library-title-actions">
+                <button id="refreshOptimizationsButton" class="ghost" type="button">Refresh status</button>
+              </div>
+            </div>
+
+            <div class="hint">Each tweak checks your current setup first. If something is already enabled on your computer or in this Minecraft instance, Zen will mark it as already done.</div>
+
+            <div id="optimizationsList" class="optimizations-list">
+              <div class="empty-state">Loading optimization checks...</div>
             </div>
           </div>
         </section>

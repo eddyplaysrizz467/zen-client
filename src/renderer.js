@@ -13,10 +13,14 @@ const tabLauncher = document.getElementById("tabLauncher");
 const tabSettings = document.getElementById("tabSettings");
 const tabLibrary = document.getElementById("tabLibrary");
 const tabSkins = document.getElementById("tabSkins");
+const tabGames = document.getElementById("tabGames");
+const tabOptimize = document.getElementById("tabOptimize");
 const panelLauncher = document.getElementById("panelLauncher");
 const panelSettings = document.getElementById("panelSettings");
 const panelLibrary = document.getElementById("panelLibrary");
 const panelSkins = document.getElementById("panelSkins");
+const panelGames = document.getElementById("panelGames");
+const panelOptimize = document.getElementById("panelOptimize");
 
 const launchType = document.getElementById("launchType");
 const minecraftVersion = document.getElementById("minecraftVersion");
@@ -50,6 +54,11 @@ const modsSearch = document.getElementById("modsSearch");
 const packsSearch = document.getElementById("packsSearch");
 const modsList = document.getElementById("modsList");
 const packsList = document.getElementById("packsList");
+const refreshGamesButton = document.getElementById("refreshGamesButton");
+const gamesSearch = document.getElementById("gamesSearch");
+const gamesList = document.getElementById("gamesList");
+const refreshOptimizationsButton = document.getElementById("refreshOptimizationsButton");
+const optimizationsList = document.getElementById("optimizationsList");
 
 const microsoftButton = document.getElementById("microsoftButton");
 const removeAccountButton = document.getElementById("removeAccountButton");
@@ -74,6 +83,10 @@ let updateStatus = null;
 let skinRenderNonce = 0;
 const installedLibraryItems = new Set();
 let installedLibraryScan = { mods: [], resourcepacks: [] };
+let detectedGames = [];
+let optimizations = [];
+let gamesBusy = false;
+let optimizationBusy = false;
 let bootFinished = false;
 let loadingFinished = false;
 const activeBamboo = new Map();
@@ -93,7 +106,9 @@ function setBusy(nextBusy) {
     openModsFolderButton,
     openPacksFolderButton,
     refreshModsButton,
-    refreshPacksButton
+    refreshPacksButton,
+    refreshGamesButton,
+    refreshOptimizationsButton
   ].forEach((button) => {
     button.disabled = nextBusy;
   });
@@ -512,6 +527,10 @@ function collectLibraryContext() {
   };
 }
 
+function collectOptimizationContext() {
+  return collectLibraryContext();
+}
+
 async function saveSettings() {
   state = await window.aeroApi.saveSettings(collectSettings());
   renderHero();
@@ -536,7 +555,9 @@ function setActiveTab(tabName) {
     { name: "launcher", button: tabLauncher, panel: panelLauncher },
     { name: "settings", button: tabSettings, panel: panelSettings },
     { name: "library", button: tabLibrary, panel: panelLibrary },
-    { name: "skins", button: tabSkins, panel: panelSkins }
+    { name: "skins", button: tabSkins, panel: panelSkins },
+    { name: "games", button: tabGames, panel: panelGames },
+    { name: "optimize", button: tabOptimize, panel: panelOptimize }
   ];
   tabs.forEach(({ name, button, panel }) => {
     const active = name === tabName;
@@ -547,20 +568,30 @@ function setActiveTab(tabName) {
   localStorage.setItem("aeroTab", tabName);
   if (tabName === "skins") renderSkinHead();
   if (tabName === "library") ensureLibraryLoaded().catch(() => {});
+  if (tabName === "games") loadGames().catch(() => {});
+  if (tabName === "optimize") loadOptimizations().catch(() => {});
 }
 
 tabLauncher.addEventListener("click", () => setActiveTab("launcher"));
 tabSettings.addEventListener("click", () => setActiveTab("settings"));
 tabLibrary.addEventListener("click", () => setActiveTab("library"));
 tabSkins.addEventListener("click", () => setActiveTab("skins"));
+tabGames.addEventListener("click", () => setActiveTab("games"));
+tabOptimize.addEventListener("click", () => setActiveTab("optimize"));
 
 launchType.addEventListener("change", async () => {
   renderVersions();
   await saveSettings();
+  if (localStorage.getItem("aeroTab") === "optimize") loadOptimizations().catch(() => {});
 });
 
 [memoryMb, minecraftDirectory, javaPath, backgroundPreset, discordEnabled, discordAppId, discordShowLauncher, discordShowPlaying].forEach((element) => {
-  element.addEventListener("change", saveSettings);
+  element.addEventListener("change", async () => {
+    await saveSettings();
+    if ((element === minecraftDirectory || element === javaPath) && localStorage.getItem("aeroTab") === "optimize") {
+      loadOptimizations().catch(() => {});
+    }
+  });
 });
 
 minecraftDirectory.addEventListener("change", () => {
@@ -569,7 +600,10 @@ minecraftDirectory.addEventListener("change", () => {
   }
 });
 
-minecraftVersion.addEventListener("change", saveSettings);
+minecraftVersion.addEventListener("change", async () => {
+  await saveSettings();
+  if (localStorage.getItem("aeroTab") === "optimize") loadOptimizations().catch(() => {});
+});
 
 microsoftButton.addEventListener("click", async () => {
   setBusy(true);
@@ -896,6 +930,208 @@ async function ensureLibraryLoaded() {
   }
 }
 
+function optimizationStatusLabel(item) {
+  if (item.status === "applied") return "Applied by Zen";
+  if (item.status === "already-done") return "Already done";
+  return "Available";
+}
+
+function gameCard(game) {
+  const row = document.createElement("div");
+  row.className = "library-item";
+
+  const content = document.createElement("div");
+  content.className = "library-item-copy";
+
+  const title = document.createElement("div");
+  title.className = "library-item-title";
+  title.textContent = game.name;
+
+  const meta = document.createElement("div");
+  meta.className = "library-item-meta";
+  meta.textContent = game.source;
+
+  content.append(title, meta);
+
+  const actions = document.createElement("div");
+  actions.className = "library-item-actions";
+
+  const launchBtn = document.createElement("button");
+  launchBtn.className = "primary";
+  launchBtn.type = "button";
+  launchBtn.textContent = "Launch";
+  launchBtn.disabled = gamesBusy || busy;
+  launchBtn.addEventListener("click", async () => {
+    gamesBusy = true;
+    renderGamesList();
+    statusText.textContent = `Launching ${game.name}...`;
+    try {
+      await window.aeroApi.launchInstalledGame(game);
+      statusText.textContent = `Launching ${game.name}.`;
+    } catch (error) {
+      statusText.textContent = `Problem: ${error.message}`;
+    } finally {
+      gamesBusy = false;
+      renderGamesList();
+    }
+  });
+
+  actions.appendChild(launchBtn);
+  row.append(content, actions);
+  return row;
+}
+
+function renderGamesList() {
+  const query = String(gamesSearch.value || "").trim().toLowerCase();
+  const filtered = detectedGames.filter((item) => item.name.toLowerCase().includes(query));
+  gamesList.innerHTML = "";
+  if (!filtered.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = detectedGames.length ? "No games match that search." : "No games found yet. Click scan again to refresh.";
+    gamesList.appendChild(empty);
+    return;
+  }
+  filtered.forEach((game) => gamesList.appendChild(gameCard(game)));
+}
+
+async function loadGames() {
+  if (gamesBusy) return;
+  gamesBusy = true;
+  gamesList.innerHTML = `<div class="empty-state">Scanning your PC for games...</div>`;
+  try {
+    detectedGames = await window.aeroApi.scanGames();
+    renderGamesList();
+    statusText.textContent = `Found ${detectedGames.length} games that Zen can launch.`;
+  } catch (error) {
+    gamesList.innerHTML = `<div class="empty-state">Problem: ${error.message}</div>`;
+    statusText.textContent = `Problem: ${error.message}`;
+  } finally {
+    gamesBusy = false;
+    renderGamesList();
+  }
+}
+
+function optimizationCard(item) {
+  const card = document.createElement("article");
+  card.className = `optimization-card optimization-${item.status}`;
+
+  const top = document.createElement("div");
+  top.className = "optimization-top";
+
+  const titleWrap = document.createElement("div");
+  const title = document.createElement("div");
+  title.className = "optimization-title";
+  title.textContent = item.title;
+  const meta = document.createElement("div");
+  meta.className = "optimization-meta";
+  meta.textContent = `${item.category} • ${item.risky ? "Risky" : "Low risk"} • ${optimizationStatusLabel(item)}`;
+  titleWrap.append(title, meta);
+
+  const badge = document.createElement("div");
+  badge.className = `optimization-badge optimization-badge-${item.status}`;
+  badge.textContent = optimizationStatusLabel(item);
+
+  top.append(titleWrap, badge);
+
+  const description = document.createElement("div");
+  description.className = "optimization-description";
+  description.textContent = item.description;
+
+  const risk = document.createElement("div");
+  risk.className = `optimization-risk${item.risky ? " risky" : ""}`;
+  risk.textContent = item.risky
+    ? `Risk note: ${item.riskReason}`
+    : "Risk note: This one is a gentle change and is easy to undo.";
+
+  const actions = document.createElement("div");
+  actions.className = "optimization-actions";
+
+  const applyBtn = document.createElement("button");
+  applyBtn.type = "button";
+  applyBtn.className = item.status === "available" ? "primary" : "ghost";
+  applyBtn.textContent = "Apply";
+  applyBtn.disabled = optimizationBusy || busy || item.status !== "available";
+  applyBtn.addEventListener("click", async () => {
+    optimizationBusy = true;
+    renderOptimizations();
+    statusText.textContent = `Applying ${item.title}...`;
+    try {
+      await window.aeroApi.applyOptimization({
+        id: item.id,
+        ...collectOptimizationContext()
+      });
+      statusText.textContent = `${item.title} applied.`;
+      optimizationBusy = false;
+      await loadOptimizations(true);
+    } catch (error) {
+      statusText.textContent = `Problem: ${error.message}`;
+    } finally {
+      optimizationBusy = false;
+      renderOptimizations();
+    }
+  });
+
+  const undoBtn = document.createElement("button");
+  undoBtn.type = "button";
+  undoBtn.className = "ghost";
+  undoBtn.textContent = "Undo";
+  undoBtn.disabled = optimizationBusy || busy || item.status === "available";
+  undoBtn.addEventListener("click", async () => {
+    optimizationBusy = true;
+    renderOptimizations();
+    statusText.textContent = `Undoing ${item.title}...`;
+    try {
+      await window.aeroApi.undoOptimization({
+        id: item.id,
+        ...collectOptimizationContext()
+      });
+      statusText.textContent = `${item.title} restored.`;
+      optimizationBusy = false;
+      await loadOptimizations(true);
+    } catch (error) {
+      statusText.textContent = `Problem: ${error.message}`;
+    } finally {
+      optimizationBusy = false;
+      renderOptimizations();
+    }
+  });
+
+  actions.append(applyBtn, undoBtn);
+  card.append(top, description, risk, actions);
+  return card;
+}
+
+function renderOptimizations() {
+  optimizationsList.innerHTML = "";
+  if (!optimizations.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "No optimization data loaded yet.";
+    optimizationsList.appendChild(empty);
+    return;
+  }
+  optimizations.forEach((item) => optimizationsList.appendChild(optimizationCard(item)));
+}
+
+async function loadOptimizations(force = false) {
+  if (optimizationBusy && !force) return;
+  optimizationBusy = true;
+  optimizationsList.innerHTML = `<div class="empty-state">Checking 30 optimization items...</div>`;
+  try {
+    optimizations = await window.aeroApi.listOptimizations(collectOptimizationContext());
+    renderOptimizations();
+    const activeCount = optimizations.filter((item) => item.status !== "available").length;
+    statusText.textContent = `${activeCount} of ${optimizations.length} optimization checks are already active.`;
+  } catch (error) {
+    optimizationsList.innerHTML = `<div class="empty-state">Problem: ${error.message}</div>`;
+    statusText.textContent = `Problem: ${error.message}`;
+  } finally {
+    optimizationBusy = false;
+    renderOptimizations();
+  }
+}
+
 refreshModsButton.addEventListener("click", () => {
   modrinthMods = [];
   lastModsQuery = null;
@@ -957,6 +1193,9 @@ modsSearch.addEventListener("input", () => {
   modsSearchTimer = setTimeout(() => ensureLibraryLoaded().catch(() => {}), 260);
 });
 packsSearch.addEventListener("input", () => renderLibraryList(packsList, modrinthPacks, packsSearch.value, "resourcepack"));
+refreshGamesButton.addEventListener("click", () => loadGames().catch(() => {}));
+gamesSearch.addEventListener("input", renderGamesList);
+refreshOptimizationsButton.addEventListener("click", () => loadOptimizations().catch(() => {}));
 
 launchButton.addEventListener("click", async () => {
   setBusy(true);
@@ -982,6 +1221,7 @@ window.aeroApi.onStateUpdated((nextState) => {
   const stored = localStorage.getItem("aeroTab");
   if (stored === "skins") renderSkinHead();
   if (stored === "library") ensureLibraryLoaded().catch(() => {});
+  if (stored === "optimize") loadOptimizations().catch(() => {});
 });
 
 window.aeroApi.onUpdateStatus((nextStatus) => {
@@ -1005,9 +1245,13 @@ async function boot() {
   seedBambooField();
   state = await window.aeroApi.getState();
   syncFromState(state);
-  setActiveTab(localStorage.getItem("aeroTab") || "launcher");
+  const storedTab = localStorage.getItem("aeroTab") || "launcher";
+  setActiveTab(storedTab);
   await refreshVersions();
-  if (localStorage.getItem("aeroTab") === "skins") renderSkinHead();
+  if (storedTab === "skins") renderSkinHead();
+  if (storedTab === "library") ensureLibraryLoaded().catch(() => {});
+  if (storedTab === "games") loadGames().catch(() => {});
+  if (storedTab === "optimize") loadOptimizations().catch(() => {});
   bootFinished = true;
   maybeFinishLoading();
 }
