@@ -949,12 +949,43 @@ function gameCard(game) {
 
   const meta = document.createElement("div");
   meta.className = "library-item-meta";
-  meta.textContent = game.source;
+  const verification = game.verified ? `Verified via ${game.verificationSource}` : "Local shortcut only";
+  meta.textContent = `${game.source} - ${verification}`;
 
-  content.append(title, meta);
+  const desc = document.createElement("div");
+  desc.className = "library-item-desc";
+  const extras = [];
+  if (Array.isArray(game.genres) && game.genres.length) extras.push(game.genres.slice(0, 3).join(", "));
+  if (Array.isArray(game.categories) && game.categories.length) extras.push(game.categories.slice(0, 2).join(", "));
+  desc.textContent = extras.join(" - ") || "Zen verified this entry with a web lookup and can show game-specific suggestions below.";
+
+  content.append(title, meta, desc);
+
+  if (Array.isArray(game.optimizationSuggestions) && game.optimizationSuggestions.length) {
+    const suggestionList = document.createElement("div");
+    suggestionList.className = "game-suggestions";
+    game.optimizationSuggestions.forEach((suggestion) => {
+      const item = document.createElement("div");
+      item.className = "game-suggestion";
+      item.innerHTML = `<strong>${suggestion.title}</strong><span>${suggestion.why}${suggestion.risky ? ` Risk: ${suggestion.riskReason || "May trade a little visual quality for performance."}` : ""}</span>`;
+      suggestionList.appendChild(item);
+    });
+    content.appendChild(suggestionList);
+  }
 
   const actions = document.createElement("div");
   actions.className = "library-item-actions";
+
+  if (game.storeUrl || game.wikiUrl) {
+    const infoBtn = document.createElement("button");
+    infoBtn.className = "ghost";
+    infoBtn.type = "button";
+    infoBtn.textContent = game.storeUrl ? "Store" : "Info";
+    infoBtn.addEventListener("click", () => {
+      window.aeroApi.openExternal(game.storeUrl || game.wikiUrl).catch(() => {});
+    });
+    actions.appendChild(infoBtn);
+  }
 
   const launchBtn = document.createElement("button");
   launchBtn.className = "primary";

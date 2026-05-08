@@ -993,6 +993,32 @@ input::placeholder {
   line-height: 1.35;
 }
 
+.game-suggestions {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+}
+
+.game-suggestion {
+  display: grid;
+  gap: 0.16rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.game-suggestion strong {
+  font-size: 0.86rem;
+  color: var(--accent-strong);
+}
+
+.game-suggestion span {
+  font-size: 0.8rem;
+  color: var(--text-mute);
+  line-height: 1.35;
+}
+
 .library-item-actions {
   display: flex;
   flex-wrap: wrap;

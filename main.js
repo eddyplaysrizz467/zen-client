@@ -636,7 +636,177 @@ function scanShortcutGames() {
   return results;
 }
 
-function scanInstalledGames() {
+function buildGameOptimizationSuggestions(game) {
+  const genres = Array.isArray(game.genres) ? game.genres.map((item) => String(item).toLowerCase()) : [];
+  const categories = Array.isArray(game.categories) ? game.categories.map((item) => String(item).toLowerCase()) : [];
+  const suggestions = [
+    {
+      title: "Cap FPS near your display refresh",
+      why: "Helps many games feel steadier and keeps GPU spikes lower.",
+      risky: false
+    },
+    {
+      title: "Disable extra overlays first",
+      why: "Discord, GeForce Experience, Steam overlay, and recorders can cause stutter in otherwise healthy games.",
+      risky: false
+    }
+  ];
+
+  if (genres.some((item) => /(action|shooter|fighting)/.test(item))) {
+    suggestions.push({
+      title: "Turn motion blur off",
+      why: "Usually improves clarity and can shave off some post-processing cost in fast games.",
+      risky: false
+    });
+    suggestions.push({
+      title: "Prefer low-latency / reflex mode",
+      why: "Useful for responsive combat and aiming when the game supports it.",
+      risky: false
+    });
+  }
+
+  if (genres.some((item) => /(rpg|adventure|survival|open world|simulation)/.test(item))) {
+    suggestions.push({
+      title: "Lower shadows before textures",
+      why: "Large world games tend to get more FPS back from shadows than from texture quality.",
+      risky: false
+    });
+    suggestions.push({
+      title: "Use balanced upscaling if available",
+      why: "DLSS, FSR, and XeSS usually help more in large scene-heavy games than raw resolution drops alone.",
+      risky: true,
+      riskReason: "Can soften the image a bit depending on the game."
+    });
+  }
+
+  if (categories.some((item) => /online pvp|multiplayer|co-op online|online co-op/.test(item))) {
+    suggestions.push({
+      title: "Keep background downloads closed",
+      why: "Online games benefit from freeing bandwidth and CPU time before launch.",
+      risky: false
+    });
+  }
+
+  return suggestions.slice(0, 5);
+}
+
+async function fetchSteamAppDetails(appid) {
+  const cacheKey = `steam-appdetails-${appid}`;
+  const json = await fetchJsonCached(
+    `https://store.steampowered.com/api/appdetails?appids=${encodeURIComponent(appid)}&l=english`,
+    cacheKey,
+    7 * 24 * 60 * 60 * 1000
+  );
+  const payload = json?.[appid];
+  if (!payload?.success || !payload?.data) return null;
+  const data = payload.data;
+  return {
+    appid: String(appid),
+    name: data.name || "",
+    genres: Array.isArray(data.genres) ? data.genres.map((item) => item.description).filter(Boolean) : [],
+    categories: Array.isArray(data.categories) ? data.categories.map((item) => item.description).filter(Boolean) : [],
+    headerImage: data.header_image || "",
+    storeUrl: `https://store.steampowered.com/app/${appid}/`
+  };
+}
+
+async function findSteamMatchByName(name) {
+  const term = String(name || "").trim();
+  if (!term) return null;
+  const cacheKey = `steam-suggest-${sanitizePathSegment(term, "game")}`;
+  const html = await fetchTextCached(
+    `https://store.steampowered.com/search/suggest?term=${encodeURIComponent(term)}&f=games&cc=us&realm=1&l=english&use_store_query=1&use_search_spellcheck=1&search_creators_and_tags=1`,
+    cacheKey,
+    7 * 24 * 60 * 60 * 1000,
+    { "User-Agent": "Zen Client" }
+  );
+  const match = html.match(/data-ds-appid="(\d+)"/i) || html.match(/\/app\/(\d+)\//i);
+  if (!match) return null;
+  return fetchSteamAppDetails(match[1]);
+}
+
+async function findWikipediaGameHint(name) {
+  const term = String(name || "").trim();
+  if (!term) return null;
+  const cacheKey = `wiki-opensearch-${sanitizePathSegment(term, "game")}`;
+  const json = await fetchJsonCached(
+    `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(term)}&limit=1&namespace=0&format=json&origin=*`,
+    cacheKey,
+    7 * 24 * 60 * 60 * 1000
+  );
+  if (!Array.isArray(json) || !Array.isArray(json[1]) || !json[1][0]) return null;
+  const title = String(json[1][0]);
+  const url = Array.isArray(json[3]) ? String(json[3][0] || "") : "";
+  const likelyGame = /\b(video game|game)\b/i.test(title) || /\/wiki\/.*_\(video_game\)/i.test(url);
+  if (!likelyGame) return null;
+  return { title, url };
+}
+
+async function enrichGameEntry(entry) {
+  try {
+    let steam = null;
+    if (entry.launchKind === "steam" && entry.appid) {
+      steam = await fetchSteamAppDetails(entry.appid);
+    } else {
+      steam = await findSteamMatchByName(entry.name);
+    }
+
+    if (steam) {
+      const merged = {
+        ...entry,
+        appid: steam.appid || entry.appid,
+        name: steam.name || entry.name,
+        verified: true,
+        verificationSource: entry.launchKind === "steam" ? "Steam library" : "Steam search",
+        genres: steam.genres,
+        categories: steam.categories,
+        headerImage: steam.headerImage,
+        storeUrl: steam.storeUrl
+      };
+      return {
+        ...merged,
+        optimizationSuggestions: buildGameOptimizationSuggestions(merged)
+      };
+    }
+
+    const wiki = await findWikipediaGameHint(entry.name);
+    if (wiki) {
+      const merged = {
+        ...entry,
+        verified: true,
+        verificationSource: "Wikipedia",
+        wikiUrl: wiki.url,
+        wikiTitle: wiki.title,
+        genres: [],
+        categories: []
+      };
+      return {
+        ...merged,
+        optimizationSuggestions: buildGameOptimizationSuggestions(merged)
+      };
+    }
+  } catch {
+    // ignore enrichment failures and fall back to local-only result
+  }
+
+  if (entry.launchKind === "steam") {
+    const merged = {
+      ...entry,
+      verified: true,
+      verificationSource: "Steam library",
+      genres: [],
+      categories: []
+    };
+    return {
+      ...merged,
+      optimizationSuggestions: buildGameOptimizationSuggestions(merged)
+    };
+  }
+
+  return null;
+}
+
+async function scanInstalledGames() {
   const seen = new Set();
   const combined = [...scanSteamGames(), ...scanShortcutGames()];
   const deduped = [];
@@ -646,7 +816,12 @@ function scanInstalledGames() {
     seen.add(key);
     deduped.push(item);
   }
-  return deduped.sort((a, b) => a.name.localeCompare(b.name));
+
+  const enriched = await Promise.allSettled(deduped.slice(0, 80).map((item) => enrichGameEntry(item)));
+  return enriched
+    .map((result) => (result.status === "fulfilled" ? result.value : null))
+    .filter(Boolean)
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 async function launchInstalledGame(entry) {
@@ -1157,6 +1332,22 @@ async function fetchJsonCached(url, cacheKey, maxAgeMs) {
   const cached = readCacheEntry(cacheKey, maxAgeMs);
   if (cached) return cached;
   const fresh = await fetchJson(url);
+  writeCacheEntry(cacheKey, fresh);
+  return fresh;
+}
+
+async function fetchText(url, headers = {}) {
+  const response = await fetch(url, { headers });
+  if (!response.ok) {
+    throw new Error(`Request failed for ${url}: ${response.status}`);
+  }
+  return response.text();
+}
+
+async function fetchTextCached(url, cacheKey, maxAgeMs, headers = {}) {
+  const cached = readCacheEntry(cacheKey, maxAgeMs);
+  if (typeof cached === "string") return cached;
+  const fresh = await fetchText(url, headers);
   writeCacheEntry(cacheKey, fresh);
   return fresh;
 }
@@ -2064,7 +2255,7 @@ ipcMain.handle("library:scanInstalled", async (_event, payload) => {
 });
 
 ipcMain.handle("games:scan", async () => {
-  const games = scanInstalledGames();
+  const games = await scanInstalledGames();
   appendLog(`[games] Found ${games.length} launchable games on this PC.`);
   return games;
 });
