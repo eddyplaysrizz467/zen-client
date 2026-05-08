@@ -21,6 +21,7 @@ const OPTIMIZATION_STATE_FILE = path.join(OPTIMIZATION_DIR, "applied.json");
 const OPTIMIZATION_HISTORY_FILE = path.join(OPTIMIZATION_DIR, "history.log");
 const DEFAULT_DISCORD_APP_ID = "1496668054803714058";
 const ZEN_CLIENT_MOD_FILENAME = "zen-client-fabric.jar";
+const ZEN_CLIENT_MOD_FILENAME_TEMPLATE = "zen-client-fabric-%VERSION%.jar";
 const ZEN_CLIENT_REQUIRED_MODS = [
   { slug: "fabric-api", label: "Fabric API" }
 ];
@@ -782,13 +783,25 @@ function initAutoUpdater() {
     });
   });
   autoUpdaterRef.on("update-available", (info) => {
+    if (!updateDownloadStarted) {
+      updateDownloadStarted = true;
+      autoUpdaterRef.downloadUpdate().catch((err) => {
+        setUpdateState({
+          stage: "error",
+          visible: true,
+          action: null,
+          message: `Update problem: ${err?.message || String(err)}`,
+          progressPercent: null
+        });
+      });
+    }
     setUpdateState({
-      stage: "available",
+      stage: "downloading",
       version: info?.version || "",
       visible: true,
-      action: "download",
-      message: `Zen Client ${info?.version || "update"} is available.`,
-      progressPercent: null
+      action: null,
+      message: `Downloading Zen Client ${info?.version || "update"}...`,
+      progressPercent: 0
     });
   });
   autoUpdaterRef.on("update-not-available", () => {
@@ -862,6 +875,17 @@ function getLoaderLaunchExtras(selectedType, minecraftRoot) {
       cwd: minecraftRoot
     }
   };
+}
+
+function getBundledZenModCandidates(minecraftVersion) {
+  const version = String(minecraftVersion || "").trim();
+  const versionedName = version ? ZEN_CLIENT_MOD_FILENAME_TEMPLATE.replace("%VERSION%", version) : "";
+  return [
+    versionedName ? (app.isPackaged ? path.join(process.resourcesPath, "bundled-mods", versionedName) : null) : null,
+    versionedName ? path.join(__dirname, "bundled-mods", versionedName) : null,
+    app.isPackaged ? path.join(process.resourcesPath, "bundled-mods", ZEN_CLIENT_MOD_FILENAME) : null,
+    path.join(__dirname, "bundled-mods", ZEN_CLIENT_MOD_FILENAME)
+  ].filter(Boolean);
 }
 
 function sanitizeAccount(account) {
@@ -1783,11 +1807,8 @@ async function ensureZenClientDependencies(minecraftRoot, minecraftVersion, laun
   }
 }
 
-function resolveBundledZenClientModPath() {
-  const directCandidates = [
-    app.isPackaged ? path.join(process.resourcesPath, "bundled-mods", ZEN_CLIENT_MOD_FILENAME) : null,
-    path.join(__dirname, "bundled-mods", ZEN_CLIENT_MOD_FILENAME)
-  ];
+function resolveBundledZenClientModPath(minecraftVersion) {
+  const directCandidates = getBundledZenModCandidates(minecraftVersion);
 
   const direct = pickNewestFile(directCandidates);
   if (direct) return direct;
@@ -1805,11 +1826,11 @@ function resolveBundledZenClientModPath() {
   return pickNewestFile(jars);
 }
 
-async function ensureZenClientMod(minecraftRoot, launchType) {
+async function ensureZenClientMod(minecraftRoot, launchType, minecraftVersion) {
   const selected = String(launchType || "").toLowerCase();
   if (selected !== "fabric" && selected !== "quilt") return;
 
-  const source = resolveBundledZenClientModPath();
+  const source = resolveBundledZenClientModPath(minecraftVersion);
   if (!source) {
     appendLog("[zen-mod] No bundled Zen Client mod was found. Skipping auto-install.");
     return;
@@ -1886,7 +1907,7 @@ async function launchGame(settings) {
   }
 
   await ensureZenClientDependencies(minecraftRoot, selectedVersion, selectedType);
-  await ensureZenClientMod(minecraftRoot, selectedType);
+  await ensureZenClientMod(minecraftRoot, selectedType, selectedVersion);
   // Auto-install requested performance mods for Fabric/Quilt.
   await ensureModrinthMods(minecraftRoot, selectedVersion, selectedType);
 
@@ -2336,10 +2357,10 @@ ipcMain.handle("update:installNow", async () => {
     stage: "installing",
     visible: true,
     action: null,
-    message: "Installing update...",
+    message: "Updating Zen Client...",
     progressPercent: 100
   });
-  autoUpdaterRef.quitAndInstall();
+  autoUpdaterRef.quitAndInstall(true, true);
   return true;
 });
 

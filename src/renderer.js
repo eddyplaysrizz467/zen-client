@@ -382,7 +382,7 @@ function renderUpdateNotice() {
 
   if (updateStatus.action === "download" || updateStatus.action === "install") {
     updateNoticeButton.hidden = false;
-    updateNoticeButton.textContent = "Yes";
+    updateNoticeButton.textContent = updateStatus.action === "install" ? "Restart to update" : "Update now";
   } else {
     updateNoticeButton.hidden = true;
   }

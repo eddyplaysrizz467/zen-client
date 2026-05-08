@@ -50,32 +50,38 @@ async function main() {
   const buildDir = path.join(root, "build");
   ensureDir(buildDir);
 
-  const size = 256;
-  const png = new PNG({ width: size, height: size });
+  const iconSizes = [16, 24, 32, 48, 64, 128, 256];
+  const white = [244, 244, 244, 255];
+  const pngPaths = [];
 
-  // Background: flat charcoal to match the launcher mark.
-  const cx = size / 2;
-  const cy = size / 2;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const idx = (size * y + x) << 2;
-      png.data[idx] = 10;
-      png.data[idx + 1] = 10;
-      png.data[idx + 2] = 10;
-      png.data[idx + 3] = 255;
+  for (const size of iconSizes) {
+    const png = new PNG({ width: size, height: size });
+    const cx = size / 2;
+    const cy = size / 2;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const idx = (size * y + x) << 2;
+        png.data[idx] = 10;
+        png.data[idx + 1] = 10;
+        png.data[idx + 2] = 10;
+        png.data[idx + 3] = 255;
+      }
     }
+
+    fillRing(png, cx, cy, size * 0.35, size * 0.24, white);
+    fillRing(png, cx, cy, size * 0.16, size * 0.08, white);
+    fillCircle(png, cx, cy, size * 0.07, white);
+
+    const outPath = path.join(buildDir, `icon-${size}.png`);
+    fs.writeFileSync(outPath, PNG.sync.write(png));
+    pngPaths.push(outPath);
   }
 
-  const white = [244, 244, 244, 255];
-  fillRing(png, cx, cy, 90, 62, white);
-  fillRing(png, cx, cy, 41, 20, white);
-  fillCircle(png, cx, cy, 17, white);
-
   const pngPath = path.join(buildDir, "icon.png");
-  fs.writeFileSync(pngPath, PNG.sync.write(png));
+  fs.copyFileSync(path.join(buildDir, "icon-256.png"), pngPath);
 
   const icoPath = path.join(buildDir, "icon.ico");
-  const icoBuf = await pngToIco([pngPath]);
+  const icoBuf = await pngToIco(pngPaths);
   fs.writeFileSync(icoPath, icoBuf);
 
   console.log(`[icons] Wrote ${pngPath}`);
