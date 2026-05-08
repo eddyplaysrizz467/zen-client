@@ -1087,7 +1087,31 @@ function createOfflineAccount(username, incomingUuid) {
   return sanitizeAccount(account);
 }
 
-async function microsoftSignIn() {
+function normalizeLaunchAuthorization(token) {
+  return {
+    ...token,
+    user_properties:
+      typeof token?.user_properties === "string"
+        ? token.user_properties
+        : JSON.stringify(token?.user_properties || {}),
+    meta: {
+      type: "msa",
+      ...(token?.meta || {})
+    }
+  };
+}
+
+async function verifyMinecraftProfile(accessToken) {
+  const response = await fetch("https://api.minecraftservices.com/minecraft/profile", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json"
+    }
+  });
+  return response.ok;
+}
+
+async function interactiveMicrosoftSignIn(existingAccountId = null) {
   appendLog("[microsoft] Opening Microsoft sign-in window...");
   const auth = new Auth("select_account");
   auth.on("load", (_code, message) => {
@@ -1108,7 +1132,7 @@ async function microsoftSignIn() {
   const minecraft = await xbox.getMinecraft();
   const mclcToken = minecraft.mclc(true);
   const account = {
-    id: crypto.randomUUID(),
+    id: existingAccountId || crypto.randomUUID(),
     type: "microsoft",
     username: mclcToken.name,
     uuid: mclcToken.uuid,
@@ -1116,6 +1140,11 @@ async function microsoftSignIn() {
   };
   upsertAccount(account);
   appendLog(`[microsoft] Signed in as ${account.username}`);
+  return account;
+}
+
+async function microsoftSignIn() {
+  const account = await interactiveMicrosoftSignIn();
   return sanitizeAccount(account);
 }
 
@@ -1124,6 +1153,18 @@ async function resolveAuth(account) {
     const auth = new Auth("select_account");
     const minecraft = await tokenUtils.fromMclcToken(auth, account.mclcToken, true);
     const refreshedToken = minecraft.mclc(true);
+    const launchAuth = normalizeLaunchAuthorization(refreshedToken);
+    let profileOk = false;
+    try {
+      profileOk = await verifyMinecraftProfile(launchAuth.access_token);
+    } catch {
+      profileOk = false;
+    }
+    if (!profileOk) {
+      appendLog("[microsoft] Session looked stale. Requesting a fresh Microsoft sign-in...");
+      const refreshedAccount = await interactiveMicrosoftSignIn(account.id);
+      return normalizeLaunchAuthorization(refreshedAccount.mclcToken);
+    }
     updateState((draft) => {
       const target = draft.accounts.find((item) => item.id === account.id);
       if (target) {
@@ -1134,26 +1175,15 @@ async function resolveAuth(account) {
     });
     sendEvent("state-updated", getClientState());
     appendLog(`[microsoft] Refreshed sign-in for ${refreshedToken.name}`);
-    return refreshedToken;
+    return launchAuth;
   }
 
   return Authenticator.getAuth(account.username);
 }
 
 async function resolveMinecraftServicesAccessToken(account) {
-  const auth = new Auth("select_account");
-  const minecraft = await tokenUtils.fromMclcToken(auth, account.mclcToken, true);
-  const refreshedToken = minecraft.mclc(true);
-  updateState((draft) => {
-    const target = draft.accounts.find((item) => item.id === account.id);
-    if (target) {
-      target.username = refreshedToken.name;
-      target.uuid = refreshedToken.uuid;
-      target.mclcToken = refreshedToken;
-    }
-  });
-  sendEvent("state-updated", getClientState());
-  return refreshedToken.access_token;
+  const auth = await resolveAuth(account);
+  return auth.access_token;
 }
 
 function findJavaInDirectory(root) {
