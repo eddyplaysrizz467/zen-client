@@ -9,6 +9,7 @@ const RPC = require("discord-rpc");
 const { PNG } = require("pngjs");
 
 const APP_NAME = "Zen Client";
+const APP_ID = "com.eddyplaysrizz467.zenclient";
 const APP_DIR = path.join(app.getPath("appData"), "ZenClient");
 const CACHE_DIR = path.join(APP_DIR, "cache");
 const STATE_FILE = path.join(APP_DIR, "launcher-state.json");
@@ -42,6 +43,17 @@ let currentUpdateState = {
   visible: false
 };
 let autoUpdaterRef = null;
+let lastLoggedMessage = "";
+let lastLoggedAt = 0;
+
+if (process.platform === "win32") {
+  try {
+    app.setAppUserModelId(APP_ID);
+  } catch {
+    // ignore
+  }
+}
+
 function ensureDir(target) {
   fs.mkdirSync(target, { recursive: true });
 }
@@ -609,6 +621,17 @@ function saveState(state) {
 }
 
 function appendLog(message) {
+  const normalized = String(message || "");
+  const now = Date.now();
+  const noisy =
+    normalized.startsWith("[download]") ||
+    normalized.includes("Found graphics adapter:") ||
+    normalized.includes("Searching for graphics cards...");
+  if (noisy && normalized === lastLoggedMessage && now - lastLoggedAt < 2500) {
+    return;
+  }
+  lastLoggedMessage = normalized;
+  lastLoggedAt = now;
   logBuffer = [...logBuffer, message].slice(-200);
   sendEvent("launcher-log", { message });
 }
@@ -710,6 +733,7 @@ function createWindow() {
 
   try {
     mainWindow.setMenuBarVisibility(false);
+    mainWindow.setIcon(icon);
   } catch {
     // ignore
   }
@@ -816,6 +840,28 @@ function initAutoUpdater() {
   updatePollTimer = setInterval(() => {
     autoUpdaterRef.checkForUpdates().catch(() => {});
   }, 5_000);
+}
+
+function getLoaderLaunchExtras(selectedType, minecraftRoot) {
+  const normalized = String(selectedType || "").trim().toLowerCase();
+  const libraryRoot = path.join(minecraftRoot, "libraries");
+
+  if (normalized === "forge" || normalized === "neoforge") {
+    return {
+      customArgs: [`-DlibraryDirectory=${libraryRoot}`],
+      overrides: {
+        libraryRoot,
+        cwd: minecraftRoot
+      }
+    };
+  }
+
+  return {
+    customArgs: [],
+    overrides: {
+      cwd: minecraftRoot
+    }
+  };
 }
 
 function sanitizeAccount(account) {
@@ -1828,6 +1874,8 @@ async function launchGame(settings) {
     customVersion = await ensureNeoForgeInstall(minecraftRoot, javaPath, selectedVersion);
   }
 
+  const loaderLaunchExtras = getLoaderLaunchExtras(selectedType, minecraftRoot);
+
   if (ensureSafeVideoMode(minecraftRoot)) {
     appendLog("[launch] Applied safe video mode (windowed 1280x720) before startup.");
   }
@@ -1895,8 +1943,10 @@ async function launchGame(settings) {
       min: "1024M"
     },
     javaPath,
+    customArgs: loaderLaunchExtras.customArgs,
     overrides: {
-      detached: false
+      detached: false,
+      ...loaderLaunchExtras.overrides
     }
   };
 
