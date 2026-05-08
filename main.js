@@ -572,6 +572,64 @@ function normalizeGameName(name) {
   return String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+function normalizeExecutableCandidate(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const stripped = raw.replace(/^"|"$/g, "").split(",")[0].trim();
+  if (!stripped.toLowerCase().endsWith(".exe")) return "";
+  return stripped;
+}
+
+function inferInstalledExecutable(displayName, installLocation, displayIcon) {
+  const fromIcon = normalizeExecutableCandidate(displayIcon);
+  if (fromIcon && fs.existsSync(fromIcon)) return fromIcon;
+
+  const root = String(installLocation || "").trim();
+  if (!root || !fs.existsSync(root)) return "";
+
+  const preferredName = normalizeGameName(displayName);
+  const files = walkDirectory(root, 1).filter((filePath) => path.extname(filePath).toLowerCase() === ".exe");
+  const preferred = files.find((filePath) => normalizeGameName(path.basename(filePath, ".exe")).includes(preferredName));
+  if (preferred) return preferred;
+
+  const fallback = files.find((filePath) => {
+    const lower = path.basename(filePath).toLowerCase();
+    return !lower.includes("unins") && !lower.includes("crash") && !lower.includes("report") && !lower.includes("vc_redist");
+  });
+  return fallback || "";
+}
+
+function queryInstalledProgramsWindows() {
+  if (process.platform !== "win32") return [];
+
+  const psScript = [
+    "$roots = @(",
+    "'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',",
+    "'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',",
+    "'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'",
+    ");",
+    "$items = foreach ($root in $roots) {",
+    "  Get-ItemProperty $root -ErrorAction SilentlyContinue | Select-Object DisplayName, InstallLocation, DisplayIcon, UninstallString",
+    "};",
+    "$items | ConvertTo-Json -Compress"
+  ].join(" ");
+
+  const result = spawnSync(
+    "powershell",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", psScript],
+    { windowsHide: true, encoding: "utf8", maxBuffer: 8 * 1024 * 1024 }
+  );
+
+  if (result.status !== 0 || !String(result.stdout || "").trim()) return [];
+
+  try {
+    const parsed = JSON.parse(result.stdout);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    return [];
+  }
+}
+
 function parseSteamLibraryPaths() {
   const candidates = [
     path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Steam", "steamapps", "libraryfolders.vdf"),
@@ -632,6 +690,25 @@ function scanShortcutGames() {
         shortcutPath: filePath
       });
     }
+  }
+  return results;
+}
+
+function scanInstalledRegistryGames() {
+  const results = [];
+  for (const entry of queryInstalledProgramsWindows()) {
+    const name = String(entry?.DisplayName || "").trim();
+    if (!name || !shouldTreatAsGameName(name)) continue;
+    const executablePath = inferInstalledExecutable(name, entry?.InstallLocation, entry?.DisplayIcon);
+    if (!executablePath) continue;
+    results.push({
+      id: `installed:${executablePath}`,
+      name,
+      source: "Windows installed apps",
+      launchKind: "executable",
+      executablePath,
+      installLocation: String(entry?.InstallLocation || "").trim()
+    });
   }
   return results;
 }
@@ -803,15 +880,29 @@ async function enrichGameEntry(entry) {
     };
   }
 
+  if (entry.launchKind === "executable") {
+    const merged = {
+      ...entry,
+      verified: true,
+      verificationSource: "Windows installed apps",
+      genres: [],
+      categories: []
+    };
+    return {
+      ...merged,
+      optimizationSuggestions: buildGameOptimizationSuggestions(merged)
+    };
+  }
+
   return null;
 }
 
 async function scanInstalledGames() {
   const seen = new Set();
-  const combined = [...scanSteamGames(), ...scanShortcutGames()];
+  const combined = [...scanSteamGames(), ...scanInstalledRegistryGames(), ...scanShortcutGames()];
   const deduped = [];
   for (const item of combined) {
-    const key = `${normalizeGameName(item.name)}:${item.source}`;
+    const key = normalizeGameName(item.name);
     if (seen.has(key)) continue;
     seen.add(key);
     deduped.push(item);
@@ -828,6 +919,16 @@ async function launchInstalledGame(entry) {
   if (!entry || typeof entry !== "object") throw new Error("Missing game entry.");
   if (entry.launchKind === "steam" && entry.appid) {
     await shell.openExternal(`steam://rungameid/${entry.appid}`);
+    return true;
+  }
+  if (entry.launchKind === "executable" && entry.executablePath) {
+    const child = spawn(entry.executablePath, [], {
+      cwd: path.dirname(entry.executablePath),
+      detached: true,
+      windowsHide: true,
+      stdio: "ignore"
+    });
+    child.unref();
     return true;
   }
   const shortcutPath = String(entry.shortcutPath || "").trim();
