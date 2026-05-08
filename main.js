@@ -89,7 +89,7 @@ function resolveInstanceRoot(baseRoot, launchType, minecraftVersion) {
   const loader = String(launchType || "vanilla").trim().toLowerCase();
   const version = sanitizePathSegment(minecraftVersion, "latest");
 
-  if (loader === "fabric" || loader === "quilt") {
+  if (loader === "fabric" || loader === "quilt" || loader === "forge" || loader === "neoforge") {
     return path.join(root, "zen-instances", loader, version);
   }
 
@@ -141,6 +141,9 @@ function modLooksIncompatible(fileName, selectedVersion, selectedLoader, manifes
   const version = String(selectedVersion || "").trim();
 
   if ((loader === "fabric" || loader === "quilt") && (lower.includes("forge") || lower.includes("neoforge"))) {
+    return "wrong loader";
+  }
+  if ((loader === "forge" || loader === "neoforge") && (lower.includes("fabric") || lower.includes("quilt"))) {
     return "wrong loader";
   }
 
@@ -1058,17 +1061,44 @@ async function fetchTextCached(url, cacheKey, maxAgeMs, headers = {}) {
   return fresh;
 }
 
+function parseMetadataVersions(xmlText) {
+  return Array.from(String(xmlText || "").matchAll(/<version>([^<]+)<\/version>/g), (match) => String(match[1] || "").trim()).filter(Boolean);
+}
+
+function uniqueList(items) {
+  return Array.from(new Set(items.filter(Boolean)));
+}
+
+function neoforgeLoaderToMinecraftVersion(loaderVersion) {
+  const match = String(loaderVersion || "").match(/^(\d+)\.(\d+)\./);
+  if (!match) return "";
+  return `1.${match[1]}.${match[2]}`;
+}
+
 async function fetchVersions() {
-  const [manifest, fabricGames, quiltGames] = await Promise.all([
+  const [manifest, fabricGames, quiltGames, forgeMetadata, neoforgeMetadata] = await Promise.all([
     fetchJsonCached("https://launchermeta.mojang.com/mc/game/version_manifest_v2.json", "versions-mojang", 30 * 60 * 1000),
     fetchJsonCached("https://meta.fabricmc.net/v2/versions/game", "versions-fabric-games", 30 * 60 * 1000),
-    fetchJsonCached("https://meta.quiltmc.org/v3/versions/game", "versions-quilt-games", 30 * 60 * 1000)
+    fetchJsonCached("https://meta.quiltmc.org/v3/versions/game", "versions-quilt-games", 30 * 60 * 1000),
+    fetchTextCached("https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml", "versions-forge-metadata", 12 * 60 * 60 * 1000),
+    fetchTextCached("https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml", "versions-neoforge-metadata", 12 * 60 * 60 * 1000)
   ]);
+
+  const forgeVersions = uniqueList(
+    parseMetadataVersions(forgeMetadata)
+      .map((item) => item.match(/^(1\.\d+(?:\.\d+)?)-/)?.[1] || "")
+      .filter((item) => item.startsWith("1."))
+  ).reverse();
+  const neoforgeVersions = uniqueList(
+    parseMetadataVersions(neoforgeMetadata).map((item) => neoforgeLoaderToMinecraftVersion(item)).filter((item) => item.startsWith("1."))
+  ).reverse();
 
   return {
     vanilla: manifest.versions.filter((item) => item.type === "release").slice(0, 80).map((item) => item.id),
     fabric: fabricGames.filter((item) => item.stable).slice(0, 80).map((item) => item.version).filter((item) => item.startsWith("1.")),
-    quilt: quiltGames.filter((item) => item.stable).slice(0, 80).map((item) => item.version).filter((item) => item.startsWith("1."))
+    quilt: quiltGames.filter((item) => item.stable).slice(0, 80).map((item) => item.version).filter((item) => item.startsWith("1.")),
+    forge: forgeVersions.slice(0, 80),
+    neoforge: neoforgeVersions.slice(0, 80)
   };
 }
 
@@ -1297,6 +1327,33 @@ function removeBrokenVersionInstall(minecraftRoot, versionId, label) {
   fs.rmSync(info.versionDir, { recursive: true, force: true });
 }
 
+function ensureLauncherProfilesFile(minecraftRoot) {
+  const target = path.join(minecraftRoot, "launcher_profiles.json");
+  if (fs.existsSync(target)) return target;
+
+  const source = path.join(DEFAULT_ROOT, "launcher_profiles.json");
+  ensureDir(minecraftRoot);
+  if (fs.existsSync(source)) {
+    fs.copyFileSync(source, target);
+    return target;
+  }
+
+  fs.writeFileSync(
+    target,
+    JSON.stringify(
+      {
+        profiles: {},
+        settings: {},
+        version: 3
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+  return target;
+}
+
 function spawnLogged(command, args, label) {
   return new Promise((resolve, reject) => {
     appendLog(`[${label}] ${command} ${args.join(" ")}`);
@@ -1343,6 +1400,45 @@ async function getLatestQuiltLoader(mcVersion) {
     return loaders[0]?.loader?.version;
   }
   return loaders?.loader?.version;
+}
+
+async function getLatestForgeLoader(mcVersion) {
+  const metadata = await fetchTextCached(
+    "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml",
+    "forge-metadata",
+    12 * 60 * 60 * 1000
+  );
+  const matches = parseMetadataVersions(metadata).filter((item) => item.startsWith(`${mcVersion}-`));
+  return matches[matches.length - 1] || "";
+}
+
+async function getLatestNeoForgeLoader(mcVersion) {
+  const metadata = await fetchTextCached(
+    "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml",
+    "neoforge-metadata",
+    12 * 60 * 60 * 1000
+  );
+  const matches = parseMetadataVersions(metadata).filter((item) => neoforgeLoaderToMinecraftVersion(item) === mcVersion);
+  return matches[matches.length - 1] || "";
+}
+
+function findInstalledVersionCandidate(minecraftRoot, prefix, matcher) {
+  const versionsDir = path.join(minecraftRoot, "versions");
+  if (!fs.existsSync(versionsDir)) return "";
+  const candidates = fs
+    .readdirSync(versionsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith(prefix) && matcher(entry.name) && getVersionInstallInfo(minecraftRoot, entry.name).isValid)
+    .map((entry) => {
+      const full = path.join(versionsDir, entry.name);
+      return {
+        name: entry.name,
+        mtime: fs.statSync(full).mtimeMs
+      };
+    });
+
+  if (!candidates.length) return "";
+  candidates.sort((a, b) => b.mtime - a.mtime);
+  return candidates[0].name;
 }
 
 async function ensureFabricInstall(minecraftRoot, javaPath, minecraftVersion) {
@@ -1459,6 +1555,78 @@ async function ensureQuiltInstall(minecraftRoot, javaPath, minecraftVersion) {
   }
 
   throw new Error("Quilt installed, but the launcher could not find the Quilt version JSON. Check the log above for installer output.");
+}
+
+async function ensureForgeInstall(minecraftRoot, javaPath, minecraftVersion) {
+  const loaderVersion = await getLatestForgeLoader(minecraftVersion);
+  if (!loaderVersion) throw new Error("Could not find a Forge loader for that version.");
+  const versionId = `forge-${loaderVersion}`;
+  let installInfo = getVersionInstallInfo(minecraftRoot, versionId);
+  if (installInfo.isValid) return versionId;
+  if (repairInheritedVersionJar(minecraftRoot, versionId)) return versionId;
+  if (installInfo.jsonExists || installInfo.jarExists) {
+    removeBrokenVersionInstall(minecraftRoot, versionId, "forge");
+  }
+
+  ensureLauncherProfilesFile(minecraftRoot);
+  const installerUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${loaderVersion}/forge-${loaderVersion}-installer.jar`;
+  const installerPath = path.join(INSTALLER_DIR, `forge-installer-${loaderVersion}.jar`);
+  await ensureFile(installerUrl, installerPath);
+  await spawnLogged(javaPath, ["-jar", installerPath, "--installClient", minecraftRoot], "forge");
+
+  installInfo = getVersionInstallInfo(minecraftRoot, versionId);
+  if (repairInheritedVersionJar(minecraftRoot, versionId)) {
+    installInfo = getVersionInstallInfo(minecraftRoot, versionId);
+  }
+  if (installInfo.isValid) return versionId;
+
+  const fallback = findInstalledVersionCandidate(
+    minecraftRoot,
+    "forge-",
+    (name) => name.includes(minecraftVersion) || name.endsWith(loaderVersion)
+  );
+  if (fallback) {
+    appendLog(`[forge] Using installed version ${fallback} (expected ${versionId})`);
+    return fallback;
+  }
+
+  throw new Error("Forge installed, but the launcher could not find the Forge version JSON. Check the log above for installer output.");
+}
+
+async function ensureNeoForgeInstall(minecraftRoot, javaPath, minecraftVersion) {
+  const loaderVersion = await getLatestNeoForgeLoader(minecraftVersion);
+  if (!loaderVersion) throw new Error("Could not find a NeoForge loader for that version.");
+  const versionId = `neoforge-${loaderVersion}`;
+  let installInfo = getVersionInstallInfo(minecraftRoot, versionId);
+  if (installInfo.isValid) return versionId;
+  if (repairInheritedVersionJar(minecraftRoot, versionId)) return versionId;
+  if (installInfo.jsonExists || installInfo.jarExists) {
+    removeBrokenVersionInstall(minecraftRoot, versionId, "neoforge");
+  }
+
+  ensureLauncherProfilesFile(minecraftRoot);
+  const installerUrl = `https://maven.neoforged.net/releases/net/neoforged/neoforge/${loaderVersion}/neoforge-${loaderVersion}-installer.jar`;
+  const installerPath = path.join(INSTALLER_DIR, `neoforge-installer-${loaderVersion}.jar`);
+  await ensureFile(installerUrl, installerPath);
+  await spawnLogged(javaPath, ["-jar", installerPath, "--installClient", minecraftRoot], "neoforge");
+
+  installInfo = getVersionInstallInfo(minecraftRoot, versionId);
+  if (repairInheritedVersionJar(minecraftRoot, versionId)) {
+    installInfo = getVersionInstallInfo(minecraftRoot, versionId);
+  }
+  if (installInfo.isValid) return versionId;
+
+  const fallback = findInstalledVersionCandidate(
+    minecraftRoot,
+    "neoforge-",
+    (name) => name === versionId || name.includes(loaderVersion)
+  );
+  if (fallback) {
+    appendLog(`[neoforge] Using installed version ${fallback} (expected ${versionId})`);
+    return fallback;
+  }
+
+  throw new Error("NeoForge installed, but the launcher could not find the NeoForge version JSON. Check the log above for installer output.");
 }
 
 const MODRINTH_BASE_MODS = [
@@ -1654,6 +1822,10 @@ async function launchGame(settings) {
     customVersion = await ensureFabricInstall(minecraftRoot, javaPath, selectedVersion);
   } else if (selectedType === "Quilt") {
     customVersion = await ensureQuiltInstall(minecraftRoot, javaPath, selectedVersion);
+  } else if (selectedType === "Forge") {
+    customVersion = await ensureForgeInstall(minecraftRoot, javaPath, selectedVersion);
+  } else if (selectedType === "NeoForge") {
+    customVersion = await ensureNeoForgeInstall(minecraftRoot, javaPath, selectedVersion);
   }
 
   if (ensureSafeVideoMode(minecraftRoot)) {
@@ -2024,6 +2196,8 @@ function normalizeLoaderForModrinth(launchType) {
   const normalized = String(launchType || "").toLowerCase();
   if (normalized === "fabric") return "fabric";
   if (normalized === "quilt") return "quilt";
+  if (normalized === "forge") return "forge";
+  if (normalized === "neoforge") return "neoforge";
   return "";
 }
 
@@ -2057,12 +2231,7 @@ ipcMain.handle("modrinth:install", async (_event, payload) => {
     versionsUrl.searchParams.set("loaders", JSON.stringify([loader]));
   }
 
-  let versions = await modrinthFetchJson(versionsUrl.toString());
-  if (!Array.isArray(versions) || versions.length === 0) {
-    // Fallback: try without loader/game filters (still picks latest).
-    const fallbackUrl = `https://api.modrinth.com/v2/project/${encodeURIComponent(projectId)}/version`;
-    versions = await modrinthFetchJson(fallbackUrl);
-  }
+  const versions = await modrinthFetchJson(versionsUrl.toString());
 
   if (!Array.isArray(versions) || versions.length === 0) {
     throw new Error("No compatible versions found on Modrinth for your selected settings.");

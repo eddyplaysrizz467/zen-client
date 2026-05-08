@@ -233,6 +233,8 @@ function loaderKey(value) {
   const normalized = String(value || "").toLowerCase();
   if (normalized === "fabric") return "fabric";
   if (normalized === "quilt") return "quilt";
+  if (normalized === "forge") return "forge";
+  if (normalized === "neoforge") return "neoforge";
   return "vanilla";
 }
 
@@ -865,6 +867,16 @@ async function modrinthSearch({ projectType, category, query, limit }) {
   url.searchParams.set("query", String(query || ""));
   const facets = [[`project_type:${projectType}`]];
   if (category) facets.push([`categories:${category}`]);
+  if (projectType === "mod") {
+    const selectedVersion = String(minecraftVersion.value || "").trim();
+    const selectedLoader = loaderKey(launchType.value);
+    if (selectedVersion) {
+      facets.push([`versions:${selectedVersion}`]);
+    }
+    if (selectedLoader !== "vanilla") {
+      facets.push([`categories:${selectedLoader}`]);
+    }
+  }
   url.searchParams.set("facets", JSON.stringify(facets));
 
   const response = await fetch(url.toString());
@@ -877,6 +889,10 @@ async function modrinthSearch({ projectType, category, query, limit }) {
 
 async function loadModsFromModrinth(query) {
   const trimmed = String(query || "").trim();
+  const selectedLoader = loaderKey(launchType.value);
+  if (selectedLoader === "vanilla") {
+    return [];
+  }
   if (trimmed) {
     return modrinthSearch({ projectType: "mod", query: trimmed, limit: 100 });
   }
@@ -888,12 +904,17 @@ async function ensureLibraryLoaded() {
   libraryBusy = true;
   try {
     const requestedModsQuery = String(modsSearch.value || "").trim();
-    modsList.innerHTML = `<div class="empty-state">Loading mods...</div>`;
+    const selectedLoader = loaderKey(launchType.value);
+    if (selectedLoader === "vanilla") {
+      modsList.innerHTML = `<div class="empty-state">Switch Launch type to Fabric, Quilt, Forge, or NeoForge to browse compatible mods.</div>`;
+    } else {
+      modsList.innerHTML = `<div class="empty-state">Loading mods...</div>`;
+    }
     if (!packsLoaded) {
       packsList.innerHTML = `<div class="empty-state">Loading resource packs...</div>`;
     }
 
-    const work = [loadModsFromModrinth(requestedModsQuery)];
+    const work = [selectedLoader === "vanilla" ? Promise.resolve([]) : loadModsFromModrinth(requestedModsQuery)];
     if (!packsLoaded) {
       work.push(modrinthSearch({ projectType: "resourcepack", category: "combat", query: "pvp", limit: 100 }));
     }
