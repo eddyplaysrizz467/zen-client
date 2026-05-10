@@ -47,6 +47,8 @@ let currentUpdateState = {
 let autoUpdaterRef = null;
 let lastLoggedMessage = "";
 let lastLoggedAt = 0;
+let updateDownloadStarted = false;
+let updateLastProgressAt = 0;
 
 if (process.platform === "win32") {
   try {
@@ -770,11 +772,16 @@ function initAutoUpdater() {
     return;
   }
 
-  autoUpdaterRef.autoDownload = false;
+  autoUpdaterRef.autoDownload = true;
   autoUpdaterRef.logger = null;
-  let updateDownloadStarted = false;
+
+  const shouldSkipUpdatePoll = () =>
+    currentUpdateState.stage === "downloading" ||
+    currentUpdateState.stage === "installing" ||
+    currentUpdateState.stage === "downloaded";
 
   autoUpdaterRef.on("checking-for-update", () => {
+    if (shouldSkipUpdatePoll()) return;
     setUpdateState({
       stage: "checking",
       visible: false,
@@ -784,18 +791,8 @@ function initAutoUpdater() {
     });
   });
   autoUpdaterRef.on("update-available", (info) => {
-    if (!updateDownloadStarted) {
-      updateDownloadStarted = true;
-      autoUpdaterRef.downloadUpdate().catch((err) => {
-        setUpdateState({
-          stage: "error",
-          visible: true,
-          action: null,
-          message: `Update problem: ${err?.message || String(err)}`,
-          progressPercent: null
-        });
-      });
-    }
+    updateDownloadStarted = true;
+    updateLastProgressAt = Date.now();
     setUpdateState({
       stage: "downloading",
       version: info?.version || "",
@@ -806,6 +803,7 @@ function initAutoUpdater() {
     });
   });
   autoUpdaterRef.on("update-not-available", () => {
+    if (shouldSkipUpdatePoll()) return;
     setUpdateState({
       stage: "idle",
       visible: false,
@@ -816,6 +814,7 @@ function initAutoUpdater() {
   });
   autoUpdaterRef.on("error", (err) => {
     updateDownloadStarted = false;
+    updateLastProgressAt = 0;
     setUpdateState({
       stage: "error",
       visible: true,
@@ -825,6 +824,8 @@ function initAutoUpdater() {
     });
   });
   autoUpdaterRef.on("download-progress", (p) => {
+    updateDownloadStarted = true;
+    updateLastProgressAt = Date.now();
     const pct = typeof p?.percent === "number" ? p.percent.toFixed(0) : "?";
     setUpdateState({
       stage: "downloading",
@@ -835,6 +836,8 @@ function initAutoUpdater() {
     });
   });
   autoUpdaterRef.on("update-downloaded", (info) => {
+    updateDownloadStarted = false;
+    updateLastProgressAt = 0;
     setUpdateState({
       stage: "downloaded",
       version: info?.version || "",
@@ -852,8 +855,25 @@ function initAutoUpdater() {
 
   if (updatePollTimer) clearInterval(updatePollTimer);
   updatePollTimer = setInterval(() => {
+    if (shouldSkipUpdatePoll()) {
+      if (
+        currentUpdateState.stage === "downloading" &&
+        updateLastProgressAt > 0 &&
+        Date.now() - updateLastProgressAt > 120000
+      ) {
+        updateDownloadStarted = false;
+        setUpdateState({
+          stage: "error",
+          visible: true,
+          action: null,
+          message: "Update download stalled. Please reopen Zen Client and try again.",
+          progressPercent: null
+        });
+      }
+      return;
+    }
     autoUpdaterRef.checkForUpdates().catch(() => {});
-  }, 5_000);
+  }, 60_000);
 }
 
 function getLoaderLaunchExtras(selectedType, minecraftRoot) {
@@ -2405,6 +2425,7 @@ ipcMain.handle("modrinth:install", async (_event, payload) => {
 
 ipcMain.handle("update:startDownload", async () => {
   if (!autoUpdaterRef) throw new Error("Auto-update is only available in the installed build.");
+  if (currentUpdateState.stage === "downloading") return true;
   setUpdateState({
     stage: "downloading",
     visible: true,
@@ -2412,6 +2433,8 @@ ipcMain.handle("update:startDownload", async () => {
     message: "Downloading update...",
     progressPercent: 0
   });
+  updateDownloadStarted = true;
+  updateLastProgressAt = Date.now();
   await autoUpdaterRef.downloadUpdate();
   return true;
 });
