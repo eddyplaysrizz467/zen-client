@@ -926,18 +926,13 @@ function getDiscordActivity(state) {
   const base = { startTimestamp: Math.floor(now / 1000) };
 
   if (currentSession && settings.discordShowPlaying) {
-      const details = currentSession.serverLabel
-        ? `Playing ${currentSession.serverLabel}`
-        : `Zen Client - ${currentSession.launchType || "Vanilla"}`;
-      let stateLine = `Playing ${currentSession.version || ""}`.trim();
-      if (currentSession.phase === "loading_peace") stateLine = "Loading peace...";
-      if (currentSession.phase === "giving_peace") stateLine = "Giving you peace...";
-      if (currentSession.phase === "enjoy") {
-        stateLine = currentSession.serverLabel
-          ? `${currentSession.launchType || "Vanilla"} ${currentSession.version || ""}`.trim()
-          : "Enjoy!";
-      }
-      return {
+    const details = currentSession.serverLabel
+      ? `Playing ${currentSession.serverLabel}`
+      : `Zen Client - ${currentSession.launchType || "Vanilla"}`;
+    const stateLine = currentSession.serverLabel
+      ? `${currentSession.launchType || "Vanilla"} ${currentSession.version || ""}`.trim()
+      : `Playing ${currentSession.version || ""}`.trim();
+    return {
       ...base,
       details,
       state: stateLine || "In game",
