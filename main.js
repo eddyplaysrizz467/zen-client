@@ -22,6 +22,7 @@ const OPTIMIZATION_HISTORY_FILE = path.join(OPTIMIZATION_DIR, "history.log");
 const DEFAULT_DISCORD_APP_ID = "1496668054803714058";
 const ZEN_CLIENT_MOD_FILENAME = "zen-client-fabric.jar";
 const ZEN_CLIENT_MOD_FILENAME_TEMPLATE = "zen-client-fabric-%VERSION%.jar";
+const AUTH_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
 const ZEN_CLIENT_REQUIRED_MODS = [
   { slug: "fabric-api", label: "Fabric API" }
 ];
@@ -1145,6 +1146,12 @@ function neoforgeLoaderToMinecraftVersion(loaderVersion) {
   return `1.${match[1]}.${match[2]}`;
 }
 
+function isRecentTimestamp(value, maxAgeMs) {
+  const ts = Number(new Date(value || 0).getTime());
+  if (!Number.isFinite(ts) || ts <= 0) return false;
+  return Date.now() - ts <= maxAgeMs;
+}
+
 async function fetchVersions() {
   const [manifest, fabricGames, quiltGames, forgeMetadata, neoforgeMetadata] = await Promise.all([
     fetchJsonCached("https://launchermeta.mojang.com/mc/game/version_manifest_v2.json", "versions-mojang", 30 * 60 * 1000),
@@ -1250,6 +1257,15 @@ async function microsoftSignIn() {
 
 async function resolveAuth(account) {
   if (account.type === "microsoft") {
+    if (
+      account.cachedLaunchAuth &&
+      account.cachedLaunchAuth.access_token &&
+      isRecentTimestamp(account.cachedLaunchAuthValidatedAt, AUTH_CACHE_MAX_AGE_MS)
+    ) {
+      appendLog(`[microsoft] Using recent saved session for ${account.username}`);
+      return normalizeLaunchAuthorization(account.cachedLaunchAuth);
+    }
+
     const auth = new Auth("select_account");
     const minecraft = await tokenUtils.fromMclcToken(auth, account.mclcToken, true);
     const refreshedToken = minecraft.mclc(true);
@@ -1271,6 +1287,8 @@ async function resolveAuth(account) {
         target.username = refreshedToken.name;
         target.uuid = refreshedToken.uuid;
         target.mclcToken = refreshedToken;
+        target.cachedLaunchAuth = launchAuth;
+        target.cachedLaunchAuthValidatedAt = new Date().toISOString();
       }
     });
     sendEvent("state-updated", getClientState());
@@ -1307,13 +1325,25 @@ function findJavaInDirectory(root) {
 function findJavaExecutable(customPath, minecraftRoot) {
   if (customPath && fs.existsSync(customPath)) return customPath;
 
+  const rootKey = sanitizePathSegment(minecraftRoot || DEFAULT_ROOT, "default-root");
+  const cachedJava = readCacheEntry(`java-path-${rootKey}`, 30 * 24 * 60 * 60 * 1000);
+  if (typeof cachedJava === "string" && cachedJava && fs.existsSync(cachedJava)) {
+    return cachedJava;
+  }
+
   const runtimePath = path.join(minecraftRoot, "runtime");
   const runtimeJava = findJavaInDirectory(runtimePath);
-  if (runtimeJava) return runtimeJava;
+  if (runtimeJava) {
+    writeCacheEntry(`java-path-${rootKey}`, runtimeJava);
+    return runtimeJava;
+  }
 
   if (process.env.JAVA_HOME) {
     const javaHomePath = path.join(process.env.JAVA_HOME, "bin", "java.exe");
-    if (fs.existsSync(javaHomePath)) return javaHomePath;
+    if (fs.existsSync(javaHomePath)) {
+      writeCacheEntry(`java-path-${rootKey}`, javaHomePath);
+      return javaHomePath;
+    }
   }
 
   const programFiles = [
@@ -1324,13 +1354,20 @@ function findJavaExecutable(customPath, minecraftRoot) {
 
   for (const directory of programFiles) {
     const found = findJavaInDirectory(directory);
-    if (found) return found;
+    if (found) {
+      writeCacheEntry(`java-path-${rootKey}`, found);
+      return found;
+    }
   }
 
   const whereJava = spawnSync("where", ["java"], { encoding: "utf8" });
   if (whereJava.status === 0) {
     const first = whereJava.stdout.split(/\r?\n/).find(Boolean);
-    if (first) return first.trim();
+    if (first) {
+      const resolved = first.trim();
+      writeCacheEntry(`java-path-${rootKey}`, resolved);
+      return resolved;
+    }
   }
 
   throw new Error("Java was not found. Install Java or the official Minecraft Launcher first, or set a custom Java path.");
@@ -1512,6 +1549,13 @@ function findInstalledVersionCandidate(minecraftRoot, prefix, matcher) {
 }
 
 async function ensureFabricInstall(minecraftRoot, javaPath, minecraftVersion) {
+  const existingCandidate = findInstalledVersionCandidate(
+    minecraftRoot,
+    "fabric-loader-",
+    (name) => name.endsWith(`-${minecraftVersion}`)
+  );
+  if (existingCandidate) return existingCandidate;
+
   const loaderVersion = await getLatestFabricLoader(minecraftVersion);
   if (!loaderVersion) throw new Error("Could not find a Fabric loader for that version.");
   const versionId = `fabric-loader-${loaderVersion}-${minecraftVersion}`;
@@ -1549,6 +1593,13 @@ async function ensureFabricInstall(minecraftRoot, javaPath, minecraftVersion) {
 }
 
 async function ensureQuiltInstall(minecraftRoot, javaPath, minecraftVersion) {
+  const existingCandidate = findInstalledVersionCandidate(
+    minecraftRoot,
+    "quilt-loader-",
+    (name) => name.endsWith(`-${minecraftVersion}`)
+  );
+  if (existingCandidate) return existingCandidate;
+
   const loaderVersion = await getLatestQuiltLoader(minecraftVersion);
   if (!loaderVersion) throw new Error("Could not find a Quilt loader for that version.");
   const versionId = `quilt-loader-${loaderVersion}-${minecraftVersion}`;
@@ -1628,6 +1679,13 @@ async function ensureQuiltInstall(minecraftRoot, javaPath, minecraftVersion) {
 }
 
 async function ensureForgeInstall(minecraftRoot, javaPath, minecraftVersion) {
+  const existingCandidate = findInstalledVersionCandidate(
+    minecraftRoot,
+    "forge-",
+    (name) => name.includes(minecraftVersion)
+  );
+  if (existingCandidate) return existingCandidate;
+
   const loaderVersion = await getLatestForgeLoader(minecraftVersion);
   if (!loaderVersion) throw new Error("Could not find a Forge loader for that version.");
   const versionId = `forge-${loaderVersion}`;
@@ -1664,6 +1722,13 @@ async function ensureForgeInstall(minecraftRoot, javaPath, minecraftVersion) {
 }
 
 async function ensureNeoForgeInstall(minecraftRoot, javaPath, minecraftVersion) {
+  const existingCandidate = findInstalledVersionCandidate(
+    minecraftRoot,
+    "neoforge-",
+    (name) => neoforgeLoaderToMinecraftVersion(name.replace(/^neoforge-/, "")) === minecraftVersion
+  );
+  if (existingCandidate) return existingCandidate;
+
   const loaderVersion = await getLatestNeoForgeLoader(minecraftVersion);
   if (!loaderVersion) throw new Error("Could not find a NeoForge loader for that version.");
   const versionId = `neoforge-${loaderVersion}`;
