@@ -10,6 +10,9 @@
       "com.eddyplaysrizz467.zenclientmod.ZenClientMod"
     ]
   },
+  "mixins": [
+    "zen-client-mod.mixins.json"
+  ],
   "depends": {
     "fabricloader": ">=0.16.14",
     "minecraft": "~1.21.11",
