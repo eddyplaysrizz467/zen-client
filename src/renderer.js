@@ -26,12 +26,9 @@ const memoryMb = document.getElementById("memoryMb");
 const minecraftDirectory = document.getElementById("minecraftDirectory");
 const javaPath = document.getElementById("javaPath");
 
-const backgroundPreset = document.getElementById("backgroundPreset");
 const discordEnabled = document.getElementById("discordEnabled");
-const discordAppId = document.getElementById("discordAppId");
 const discordShowLauncher = document.getElementById("discordShowLauncher");
 const discordShowPlaying = document.getElementById("discordShowPlaying");
-const installMenuPackButton = document.getElementById("installMenuPackButton");
 
 const skinPreviewBox = document.getElementById("skinPreviewBox");
 const skinPreviewMeta = document.getElementById("skinPreviewMeta");
@@ -93,7 +90,6 @@ function setBusy(nextBusy) {
     offlineButton,
     refreshVersionsButton,
     launchButton,
-    installMenuPackButton,
     refreshSkinButton,
     uploadSkinButton,
     openModsFolderButton,
@@ -277,9 +273,7 @@ function renderSettings() {
   memoryMb.value = state.settings.memoryMb || 4096;
   minecraftDirectory.value = state.settings.minecraftDirectory || "";
   javaPath.value = state.settings.javaPath || "";
-  backgroundPreset.value = normalizeBackgroundPreset(state.settings.backgroundPreset);
   discordEnabled.value = state.settings.discordPresenceEnabled ? "on" : "off";
-  discordAppId.value = state.settings.discordAppId || "";
   discordShowLauncher.value = state.settings.discordShowLauncher ? "on" : "off";
   discordShowPlaying.value = state.settings.discordShowPlaying ? "on" : "off";
   renderVersions();
@@ -504,9 +498,9 @@ function collectSettings() {
     minecraftDirectory: minecraftDirectory.value.trim(),
     javaPath: javaPath.value.trim(),
     memoryMb: Number(memoryMb.value || 4096),
-    backgroundPreset: backgroundPreset.value,
+    backgroundPreset: state?.settings?.backgroundPreset || "bamboo",
     discordPresenceEnabled: discordEnabled.value === "on",
-    discordAppId: discordAppId.value.trim(),
+    discordAppId: state?.settings?.discordAppId || "",
     discordShowLauncher: discordShowLauncher.value === "on",
     discordShowPlaying: discordShowPlaying.value === "on"
   };
@@ -576,7 +570,7 @@ launchType.addEventListener("change", async () => {
   if (localStorage.getItem("aeroTab") === "optimize") loadOptimizations().catch(() => {});
 });
 
-[memoryMb, minecraftDirectory, javaPath, backgroundPreset, discordEnabled, discordAppId, discordShowLauncher, discordShowPlaying].forEach((element) => {
+[memoryMb, minecraftDirectory, javaPath, discordEnabled, discordShowLauncher, discordShowPlaying].forEach((element) => {
   element.addEventListener("change", async () => {
     await saveSettings();
     if ((element === minecraftDirectory || element === javaPath) && localStorage.getItem("aeroTab") === "optimize") {
@@ -641,24 +635,6 @@ removeAccountButton.addEventListener("click", async () => {
 });
 
 refreshVersionsButton.addEventListener("click", refreshVersions);
-
-installMenuPackButton.addEventListener("click", async () => {
-  setBusy(true);
-  statusText.textContent = "Installing Zen menu pack...";
-  try {
-    await saveSettings();
-    const settings = collectSettings();
-    await window.aeroApi.installAeroMenuPack({
-      minecraftDirectory: settings.minecraftDirectory,
-      preset: settings.backgroundPreset
-    });
-    statusText.textContent = "Zen menu pack installed. Enable it in Minecraft Resource Packs.";
-  } catch (error) {
-    statusText.textContent = `Problem: ${error.message}`;
-  } finally {
-    setBusy(false);
-  }
-});
 
 refreshSkinButton.addEventListener("click", () => renderSkinHead());
 skinVariant.addEventListener("change", updateSkinControls);
