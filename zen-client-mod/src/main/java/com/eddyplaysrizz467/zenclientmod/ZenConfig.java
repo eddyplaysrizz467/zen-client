@@ -13,11 +13,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import net.fabricmc.loader.api.FabricLoader;
 
 public final class ZenConfig {
   private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-  private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("zen-client.json");
+  private static final Path CONFIG_PATH = ZenPaths.configDir().resolve("zen-client.json");
   private static final double MIN_FLIGHT_SPEED = 0.4D;
   private static final double MAX_FLIGHT_SPEED = 3.0D;
   private static final double MIN_AIM_ASSIST_RANGE = 2.0D;

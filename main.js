@@ -939,6 +939,46 @@ function normalizeZenModLoader(value) {
   return "";
 }
 
+function parseMcVersionParts(version) {
+  return String(version || "")
+    .trim()
+    .split(".")
+    .map((part) => Number.parseInt(part, 10))
+    .filter((part) => Number.isFinite(part));
+}
+
+function compareMcVersions(left, right) {
+  const a = parseMcVersionParts(left);
+  const b = parseMcVersionParts(right);
+  const length = Math.max(a.length, b.length);
+  for (let i = 0; i < length; i += 1) {
+    const av = a[i] || 0;
+    const bv = b[i] || 0;
+    if (av !== bv) return av - bv;
+  }
+  return 0;
+}
+
+function versionMatchesSimpleRange(version, rangeText) {
+  const versionValue = String(version || "").trim();
+  const range = String(rangeText || "").trim();
+  if (!versionValue || !range) return false;
+
+  const parts = range.split(/\s+/).filter(Boolean);
+  return parts.every((part) => {
+    const match = part.match(/^(>=|<=|>|<|=)?(.+)$/);
+    if (!match) return false;
+    const operator = match[1] || "=";
+    const target = String(match[2] || "").trim();
+    const comparison = compareMcVersions(versionValue, target);
+    if (operator === ">=") return comparison >= 0;
+    if (operator === "<=") return comparison <= 0;
+    if (operator === ">") return comparison > 0;
+    if (operator === "<") return comparison < 0;
+    return comparison === 0;
+  });
+}
+
 function getBundledZenBundleSpec(launchType, minecraftVersion) {
   const loader = normalizeZenModLoader(launchType);
   const version = String(minecraftVersion || "").trim();
@@ -965,6 +1005,18 @@ function getBundledZenBundleSpec(launchType, minecraftVersion) {
     if (loaderOnly) {
       return {
         ...loaderOnly,
+        loader,
+        minecraftVersion: version
+      };
+    }
+
+    const ranged = manifest.bundles.find((bundle) =>
+      String(bundle.loader || "").toLowerCase() === loader &&
+      versionMatchesSimpleRange(version, bundle.minecraftVersionRange)
+    );
+    if (ranged) {
+      return {
+        ...ranged,
         loader,
         minecraftVersion: version
       };
