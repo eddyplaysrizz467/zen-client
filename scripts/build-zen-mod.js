@@ -98,7 +98,7 @@ const bundles = [
   {
     loader: "fabric",
     minecraftVersion: minecraftVersion || "",
-    minecraftVersionRange: ">=1.21 <=1.21.99",
+    minecraftVersionRange: ">=1.21",
     file: minecraftVersion ? `zen-client-fabric-${minecraftVersion}.jar` : "zen-client-fabric.jar",
     targetName: "zen-client-fabric.jar",
     requiredMods: ["fabric-api"]
@@ -106,7 +106,7 @@ const bundles = [
   {
     loader: "quilt",
     minecraftVersion: minecraftVersion || "",
-    minecraftVersionRange: ">=1.21 <=1.21.99",
+    minecraftVersionRange: ">=1.21",
     file: minecraftVersion ? `zen-client-quilt-${minecraftVersion}.jar` : "zen-client-quilt.jar",
     targetName: "zen-client-quilt.jar",
     requiredMods: ["fabric-api"],

@@ -980,10 +980,29 @@ function versionMatchesSimpleRange(version, rangeText) {
   });
 }
 
+function isZenClientModSupportedMinecraftVersion(minecraftVersion) {
+  const value = String(minecraftVersion || "").trim();
+  if (!value) return false;
+  if (isModernMinecraftRelease(value)) return compareMcVersions(value, "1.21") >= 0;
+
+  const namedSnapshot = value.match(/^(\d+\.\d+(?:\.\d+)?)-(snapshot|pre|rc)-?\d+$/i);
+  if (namedSnapshot) {
+    const baseVersion = namedSnapshot[1];
+    if (baseVersion.startsWith("1.")) return compareMcVersions(baseVersion, "1.21") >= 0;
+    return Number.parseInt(baseVersion.split(".")[0], 10) >= 25;
+  }
+
+  const weekSnapshot = value.toLowerCase().match(/^(\d{2})w\d{2}[a-z]$/);
+  if (weekSnapshot) return Number.parseInt(weekSnapshot[1], 10) >= 25;
+
+  return false;
+}
+
 function getBundledZenBundleSpec(launchType, minecraftVersion) {
   const loader = normalizeZenModLoader(launchType);
   const version = String(minecraftVersion || "").trim();
   if (!loader) return null;
+  if (!isZenClientModSupportedMinecraftVersion(version)) return null;
 
   const manifest = readBundledZenBundleManifest();
   if (manifest?.bundles?.length) {
