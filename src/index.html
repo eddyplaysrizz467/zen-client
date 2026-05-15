@@ -98,25 +98,38 @@
             </div>
 
             <div class="settings-grid">
-              <label>
+              <label class="select-field">
                 Launch type
-                <select id="launchType">
-                  <option>Vanilla</option>
-                  <option>Fabric</option>
-                  <option>Quilt</option>
-                  <option>Forge</option>
-                  <option>NeoForge</option>
-                </select>
+                <span class="select-shell">
+                  <select id="launchType">
+                    <option>Vanilla</option>
+                    <option>Fabric</option>
+                    <option>Quilt</option>
+                    <option>Forge</option>
+                    <option>NeoForge</option>
+                  </select>
+                </span>
               </label>
 
-              <label>
+              <label class="select-field">
                 Minecraft version
-                <select id="minecraftVersion"></select>
+                <span class="select-shell">
+                  <select id="minecraftVersion"></select>
+                </span>
               </label>
 
               <label>
                 Memory (MB)
                 <input id="memoryMb" type="number" min="1024" step="256" />
+              </label>
+
+              <label class="toggle-field">
+                <span class="toggle-copy">
+                  <span>Snapshots</span>
+                  <small>Show experimental versions</small>
+                </span>
+                <input id="showSnapshots" type="checkbox" />
+                <span class="toggle-control" aria-hidden="true"></span>
               </label>
 
               <label class="span-two">

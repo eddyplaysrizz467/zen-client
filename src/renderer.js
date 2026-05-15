@@ -22,6 +22,7 @@ const panelOptimize = document.getElementById("panelOptimize");
 
 const launchType = document.getElementById("launchType");
 const minecraftVersion = document.getElementById("minecraftVersion");
+const showSnapshots = document.getElementById("showSnapshots");
 const memoryMb = document.getElementById("memoryMb");
 const minecraftDirectory = document.getElementById("minecraftDirectory");
 const javaPath = document.getElementById("javaPath");
@@ -270,6 +271,7 @@ function renderAccounts() {
 function renderSettings() {
   if (!state) return;
   launchType.value = state.settings.launchType || "Vanilla";
+  showSnapshots.checked = Boolean(state.settings.showSnapshots);
   memoryMb.value = state.settings.memoryMb || 4096;
   minecraftDirectory.value = state.settings.minecraftDirectory || "";
   javaPath.value = state.settings.javaPath || "";
@@ -281,7 +283,8 @@ function renderSettings() {
 
 function renderVersions() {
   const key = loaderKey(launchType.value);
-  const items = versions[key] || [];
+  const allItems = versions[key] || [];
+  const items = showSnapshots.checked ? allItems : allItems.filter((version) => !isSnapshotVersion(version));
   const current = state?.settings?.minecraftVersion || "";
   minecraftVersion.innerHTML = "";
   items.forEach((version) => {
@@ -308,6 +311,14 @@ function renderHero() {
   } else {
     heroHelp.textContent = `Offline profile ${selected.username} selected. Use Microsoft sign-in if you want real online account auth.`;
   }
+}
+
+function isSnapshotVersion(version) {
+  const value = String(version || "").trim().toLowerCase();
+  if (!value) return false;
+  if (/^\d{2}w\d{2}[a-z]$/.test(value)) return true;
+  if (/^1\.\d+(?:\.\d+)?-(pre|rc)\d+$/.test(value)) return true;
+  return !/^1\.\d+(?:\.\d+)?$/.test(value);
 }
 
 function skinHeadUrl(account) {
@@ -499,6 +510,7 @@ function collectSettings() {
     javaPath: javaPath.value.trim(),
     memoryMb: Number(memoryMb.value || 4096),
     backgroundPreset: state?.settings?.backgroundPreset || "bamboo",
+    showSnapshots: showSnapshots.checked,
     discordPresenceEnabled: discordEnabled.value === "on",
     discordAppId: state?.settings?.discordAppId || "",
     discordShowLauncher: discordShowLauncher.value === "on",
@@ -570,8 +582,9 @@ launchType.addEventListener("change", async () => {
   if (localStorage.getItem("aeroTab") === "optimize") loadOptimizations().catch(() => {});
 });
 
-[memoryMb, minecraftDirectory, javaPath, discordEnabled, discordShowLauncher, discordShowPlaying].forEach((element) => {
+[memoryMb, minecraftDirectory, javaPath, showSnapshots, discordEnabled, discordShowLauncher, discordShowPlaying].forEach((element) => {
   element.addEventListener("change", async () => {
+    if (element === showSnapshots) renderVersions();
     await saveSettings();
     if ((element === minecraftDirectory || element === javaPath) && localStorage.getItem("aeroTab") === "optimize") {
       loadOptimizations().catch(() => {});

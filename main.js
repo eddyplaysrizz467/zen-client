@@ -574,6 +574,7 @@ function defaultState() {
       javaPath: "",
       memoryMb: 4096,
       backgroundPreset: "bamboo",
+      showSnapshots: false,
       discordPresenceEnabled: true,
       discordAppId: DEFAULT_DISCORD_APP_ID,
       discordShowLauncher: true,
@@ -1297,6 +1298,22 @@ function neoforgeLoaderToMinecraftVersion(loaderVersion) {
   return `1.${match[1]}.${match[2]}`;
 }
 
+function isModernMinecraftRelease(version) {
+  const value = String(version || "").trim();
+  if (!/^1\.\d+(?:\.\d+)?$/.test(value)) return false;
+  return compareMcVersions(value, "1.8.9") >= 0;
+}
+
+function isModernMinecraftGameVersion(version) {
+  const value = String(version || "").trim();
+  if (!value) return false;
+  if (isModernMinecraftRelease(value)) return true;
+  const lower = value.toLowerCase();
+  if (/^\d{2}w\d{2}[a-z]$/.test(lower)) return true;
+  if (/^1\.\d+(?:\.\d+)?-(pre|rc)\d+$/i.test(value)) return true;
+  return false;
+}
+
 function isRecentTimestamp(value, maxAgeMs) {
   const ts = Number(new Date(value || 0).getTime());
   if (!Number.isFinite(ts) || ts <= 0) return false;
@@ -1323,20 +1340,20 @@ async function fetchVersions() {
 
   const vanillaVersions = manifest.versions
     .filter((item) => item && item.id && item.type !== "old_alpha" && item.type !== "old_beta")
-    .slice(0, 160)
-    .map((item) => item.id);
+    .map((item) => String(item.id || "").trim())
+    .filter(isModernMinecraftGameVersion);
 
   const fabricVersions = uniqueList(
     fabricGames
       .map((item) => String(item?.version || "").trim())
-      .filter((item) => item.startsWith("1."))
-  ).slice(0, 160);
+      .filter(isModernMinecraftGameVersion)
+  );
 
   const quiltVersions = uniqueList(
     quiltGames
       .map((item) => String(item?.version || "").trim())
-      .filter((item) => item.startsWith("1."))
-  ).slice(0, 160);
+      .filter(isModernMinecraftGameVersion)
+  );
 
   return {
     vanilla: vanillaVersions,
