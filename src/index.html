@@ -298,13 +298,24 @@
                 <div class="library-title">Host from this PC</div>
                 <div class="friend-code-box">
                   <div>
-                    <div class="friend-code-label">Local address</div>
+                    <div class="friend-code-label">Same Wi-Fi address</div>
                     <div id="hostAddressText" class="friend-code-value">Checking...</div>
                   </div>
                   <button id="refreshFriendsButton" class="ghost" type="button">Refresh</button>
                 </div>
-                <div class="hint">In a singleplayer world, press Esc and use Host Zen LAN. Friends on the same Wi-Fi can join with the address above plus the LAN port shown in Minecraft chat.</div>
-                <div class="hint">For friends outside your Wi-Fi, use port forwarding, a VPN, or a tunnel, then save that public address below.</div>
+                <div class="friend-code-box">
+                  <div>
+                    <div class="friend-code-label">Internet invite address</div>
+                    <div id="publicAddressText" class="friend-code-value">Checking...</div>
+                  </div>
+                  <button id="copyInviteButton" class="ghost" type="button">Copy</button>
+                </div>
+                <label>
+                  LAN port from Minecraft chat
+                  <input id="hostPortInput" type="number" min="1" max="65535" placeholder="Example: 52341" />
+                </label>
+                <div class="hint">In a singleplayer world, press Esc and use Host Zen LAN. Put the port Minecraft shows in chat here, then copy the invite address.</div>
+                <div class="hint">Friends outside your Wi-Fi can join using the internet invite address after that port is allowed through your router/firewall.</div>
               </div>
 
               <form id="friendForm" class="friend-form">

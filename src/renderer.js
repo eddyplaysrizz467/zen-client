@@ -60,6 +60,9 @@ const refreshOptimizationsButton = document.getElementById("refreshOptimizations
 const optimizationsList = document.getElementById("optimizationsList");
 const refreshFriendsButton = document.getElementById("refreshFriendsButton");
 const hostAddressText = document.getElementById("hostAddressText");
+const publicAddressText = document.getElementById("publicAddressText");
+const copyInviteButton = document.getElementById("copyInviteButton");
+const hostPortInput = document.getElementById("hostPortInput");
 const friendForm = document.getElementById("friendForm");
 const friendName = document.getElementById("friendName");
 const friendAddress = document.getElementById("friendAddress");
@@ -93,6 +96,7 @@ let optimizationBusy = false;
 let bootFinished = false;
 let loadingFinished = false;
 let activeEnhancedSelect = null;
+let friendsHostInfo = { localIp: "", publicIp: "" };
 const activeBamboo = new Map();
 const BAMBOO_COUNT = 5;
 
@@ -394,14 +398,37 @@ function renderHero() {
   }
 }
 
+function formatHostInvite(ip, port) {
+  const cleanIp = String(ip || "").trim();
+  const cleanPort = String(port || "").trim();
+  if (!cleanIp) return "";
+  return cleanPort ? `${cleanIp}:${cleanPort}` : `${cleanIp}:<port>`;
+}
+
+function updateFriendInviteAddresses() {
+  const port = hostPortInput?.value || "";
+  if (hostAddressText) {
+    hostAddressText.textContent = formatHostInvite(friendsHostInfo.localIp, port) || "No local network address found";
+  }
+  if (publicAddressText) {
+    publicAddressText.textContent = formatHostInvite(friendsHostInfo.publicIp, port) || "Public IP unavailable";
+  }
+}
+
 async function loadFriendsHostInfo() {
   if (!hostAddressText) return;
   hostAddressText.textContent = "Checking...";
+  if (publicAddressText) publicAddressText.textContent = "Checking...";
   try {
     const info = await window.aeroApi.getFriendsHostInfo();
-    hostAddressText.textContent = info.localAddress || "No local network address found";
+    friendsHostInfo = {
+      localIp: info.localIp || "",
+      publicIp: info.publicIp || ""
+    };
+    updateFriendInviteAddresses();
   } catch (error) {
     hostAddressText.textContent = `Problem: ${error.message}`;
+    if (publicAddressText) publicAddressText.textContent = "Public IP unavailable";
   }
 }
 
@@ -736,6 +763,21 @@ document.addEventListener("keydown", (event) => {
 
 refreshFriendsButton.addEventListener("click", () => {
   loadFriendsHostInfo().catch(() => {});
+});
+
+hostPortInput.addEventListener("input", () => {
+  updateFriendInviteAddresses();
+});
+
+copyInviteButton.addEventListener("click", async () => {
+  const port = String(hostPortInput.value || "").trim();
+  const invite = formatHostInvite(friendsHostInfo.publicIp || friendsHostInfo.localIp, port);
+  if (!invite || invite.includes("<port>")) {
+    statusText.textContent = "Type the LAN port Minecraft shows first.";
+    return;
+  }
+  await navigator.clipboard.writeText(invite);
+  statusText.textContent = `Copied invite address ${invite}`;
 });
 
 friendForm.addEventListener("submit", async (event) => {

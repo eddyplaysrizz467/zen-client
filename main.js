@@ -1320,6 +1320,21 @@ function getPrimaryLocalAddress() {
   return "";
 }
 
+async function getPublicAddress() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch("https://api.ipify.org?format=json", { signal: controller.signal });
+    if (!response.ok) return "";
+    const data = await response.json();
+    return String(data?.ip || "").trim();
+  } catch {
+    return "";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function saveSettings(settings) {
   updateState((draft) => {
     draft.settings = {
@@ -2628,8 +2643,12 @@ ipcMain.handle("friends:add", async (_event, payload) => addFriend(payload));
 ipcMain.handle("friends:remove", async (_event, friendId) => removeFriend(String(friendId || "")));
 ipcMain.handle("friends:hostInfo", async () => {
   const address = getPrimaryLocalAddress();
+  const publicIp = await getPublicAddress();
   return {
+    localIp: address,
+    publicIp,
     localAddress: address ? `${address}:<LAN port>` : "",
+    publicAddress: publicIp ? `${publicIp}:<LAN port>` : "",
     note: "Use Host Zen LAN in-game, then replace <LAN port> with the port Minecraft shows in chat."
   };
 });

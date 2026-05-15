@@ -174,7 +174,7 @@ public final class ZenClientMod implements ClientModInitializer {
     boolean published = server.publishServer(GameType.SURVIVAL, false, port);
     if (published) {
       showZenToast(client, "Zen LAN is open", "Port " + server.getPort());
-      sendPlayerMessage(client, "Zen LAN hosted from this PC. Friends on your Wi-Fi can join using your launcher Friends address and port " + server.getPort() + ".");
+      sendPlayerMessage(client, "Zen LAN hosted from this PC on port " + server.getPort() + ". Put this port in the launcher Friends tab, then copy the invite address.");
     } else {
       showZenToast(client, "Zen LAN failed", "Could not open a local port.");
       sendPlayerMessage(client, "Zen LAN could not open. Check firewall permissions and try again.");
