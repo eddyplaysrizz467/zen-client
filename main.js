@@ -51,6 +51,17 @@ let lastLoggedMessage = "";
 let lastLoggedAt = 0;
 let updateDownloadStarted = false;
 let updateLastProgressAt = 0;
+let allowAppQuit = false;
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) restoreLauncherWindow();
+    else if (app.isReady()) createWindow();
+  });
+}
 
 if (process.platform === "win32") {
   try {
@@ -660,11 +671,11 @@ function sendEvent(channel, payload) {
   }
 }
 
-function minimizeLauncherWindow() {
+function hideLauncherWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try {
-    mainWindow.setSkipTaskbar(false);
-    if (!mainWindow.isMinimized()) mainWindow.minimize();
+    mainWindow.setSkipTaskbar(true);
+    mainWindow.hide();
   } catch {
     // ignore
   }
@@ -749,10 +760,10 @@ function createWindow() {
   }
 
   mainWindow.on("close", (event) => {
-    if (process.env.AERO_SMOKE_TEST === "1") return;
-    if (currentSession) {
+    if (process.env.AERO_SMOKE_TEST === "1" || allowAppQuit) return;
+    if (currentSession || !allowAppQuit) {
       event.preventDefault();
-      minimizeLauncherWindow();
+      hideLauncherWindow();
     }
   });
 
@@ -2460,14 +2471,15 @@ async function launchGame(settings) {
   };
   setDiscordPresence();
 
-  // Keep the launcher minimized while Minecraft is running so it does not interfere with fullscreen input/cursor behavior.
-  minimizeLauncherWindow();
+  // Keep the launcher hidden while Minecraft is running so it does not interfere with fullscreen input/cursor behavior.
+  hideLauncherWindow();
 
   const proc = await launchClient.launch(launchOptions);
   if (!proc) {
     currentLaunchContext = null;
     currentSession = null;
     setDiscordPresence();
+    restoreLauncherWindow();
     throw new Error("Minecraft did not start. Check the built-in log for the Java or launcher error.");
   }
   return true;
@@ -2964,7 +2976,12 @@ app.whenReady().then(() => {
   });
 });
 
+app.on("before-quit", () => {
+  allowAppQuit = true;
+});
+
 app.on("window-all-closed", () => {
+  if (!allowAppQuit) return;
   if (currentSession) return;
   if (process.platform !== "darwin") app.quit();
 });
