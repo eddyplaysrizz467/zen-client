@@ -1304,14 +1304,40 @@ function isModernMinecraftRelease(version) {
   return compareMcVersions(value, "1.8.9") >= 0;
 }
 
+const MIN_SUPPORTED_SNAPSHOT_RELEASE_TIME = Date.parse("2018-10-24T00:00:00Z"); // 18w43a, first 1.14 snapshot.
+
+function isModernSnapshotName(version) {
+  const value = String(version || "").trim();
+  const lower = value.toLowerCase();
+  const weekSnapshot = lower.match(/^(\d{2})w(\d{2})[a-z]$/);
+  if (weekSnapshot) {
+    const year = Number.parseInt(weekSnapshot[1], 10);
+    const week = Number.parseInt(weekSnapshot[2], 10);
+    return year > 18 || (year === 18 && week >= 43);
+  }
+
+  const prerelease = value.match(/^(1\.\d+(?:\.\d+)?)-(pre|rc)\d+$/i);
+  if (prerelease) return compareMcVersions(prerelease[1], "1.14") >= 0;
+
+  return false;
+}
+
 function isModernMinecraftGameVersion(version) {
   const value = String(version || "").trim();
   if (!value) return false;
   if (isModernMinecraftRelease(value)) return true;
-  const lower = value.toLowerCase();
-  if (/^\d{2}w\d{2}[a-z]$/.test(lower)) return true;
-  if (/^1\.\d+(?:\.\d+)?-(pre|rc)\d+$/i.test(value)) return true;
-  return false;
+  return isModernSnapshotName(value);
+}
+
+function isModernMinecraftManifestVersion(item) {
+  const id = String(item?.id || "").trim();
+  if (!id) return false;
+  if (isModernMinecraftRelease(id)) return true;
+  if (!isModernSnapshotName(id)) return false;
+
+  const releaseTime = Number(new Date(item?.releaseTime || item?.time || 0).getTime());
+  if (!Number.isFinite(releaseTime) || releaseTime <= 0) return true;
+  return releaseTime >= MIN_SUPPORTED_SNAPSHOT_RELEASE_TIME;
 }
 
 function isRecentTimestamp(value, maxAgeMs) {
@@ -1340,8 +1366,8 @@ async function fetchVersions() {
 
   const vanillaVersions = manifest.versions
     .filter((item) => item && item.id && item.type !== "old_alpha" && item.type !== "old_beta")
-    .map((item) => String(item.id || "").trim())
-    .filter(isModernMinecraftGameVersion);
+    .filter(isModernMinecraftManifestVersion)
+    .map((item) => String(item.id || "").trim());
 
   const fabricVersions = uniqueList(
     fabricGames
