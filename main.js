@@ -16,6 +16,7 @@ const STATE_FILE = path.join(APP_DIR, "launcher-state.json");
 const LEGACY_STATE_FILE = path.join(app.getPath("appData"), "AeroClient", "launcher-state.json");
 const DEFAULT_ROOT = path.join(app.getPath("appData"), ".minecraft");
 const INSTALLER_DIR = path.join(APP_DIR, "installers");
+const MANAGED_RUNTIME_DIR = path.join(APP_DIR, "runtime");
 const OPTIMIZATION_DIR = path.join(APP_DIR, "optimizations");
 const OPTIMIZATION_STATE_FILE = path.join(OPTIMIZATION_DIR, "applied.json");
 const OPTIMIZATION_HISTORY_FILE = path.join(OPTIMIZATION_DIR, "history.log");
@@ -1542,9 +1543,21 @@ async function resolveMinecraftServicesAccessToken(account) {
   return auth.access_token;
 }
 
-function findJavaInDirectory(root) {
+function getJavaMajorVersion(javaPath) {
+  if (!javaPath || !fs.existsSync(javaPath)) return 0;
+  const result = spawnSync(javaPath, ["-version"], { encoding: "utf8" });
+  const output = `${result.stderr || ""}\n${result.stdout || ""}`;
+  const match = output.match(/version\s+"(\d+)(?:\.(\d+))?/i);
+  if (!match) return 0;
+  const major = Number.parseInt(match[1], 10);
+  if (major === 1 && match[2]) return Number.parseInt(match[2], 10) || 0;
+  return major || 0;
+}
+
+function collectJavaExecutables(root) {
   if (!fs.existsSync(root)) return null;
   const stack = [root];
+  const found = [];
   while (stack.length) {
     const current = stack.pop();
     const entries = fs.readdirSync(current, { withFileTypes: true });
@@ -1553,33 +1566,102 @@ function findJavaInDirectory(root) {
       if (entry.isDirectory()) {
         stack.push(fullPath);
       } else if (entry.isFile() && (entry.name === "java.exe" || entry.name === "javaw.exe")) {
-        return fullPath;
+        found.push(fullPath);
       }
     }
   }
-  return null;
+  return found;
 }
 
-function findJavaExecutable(customPath, minecraftRoot) {
-  if (customPath && fs.existsSync(customPath)) return customPath;
+function findJavaInDirectory(root, requiredMajor = 0) {
+  const candidates = collectJavaExecutables(root) || [];
+  if (!requiredMajor) return candidates[0] || null;
+
+  return candidates
+    .map((javaPath) => ({ javaPath, major: getJavaMajorVersion(javaPath) }))
+    .filter((item) => item.major >= requiredMajor)
+    .sort((left, right) => right.major - left.major)[0]?.javaPath || null;
+}
+
+function getRequiredJavaMajor(minecraftVersion) {
+  const value = String(minecraftVersion || "").trim().toLowerCase();
+  if (!value) return 21;
+  if (/^(\d{2})w\d{2}[a-z]$/.test(value)) {
+    const year = Number.parseInt(value.slice(0, 2), 10);
+    return year >= 25 ? 25 : 21;
+  }
+  if (/^\d+\.\d+(?:\.\d+)?-(snapshot|pre|rc)-?\d+$/i.test(value) && !value.startsWith("1.")) return 25;
+  if (/^\d+\.\d+(?:\.\d+)?$/.test(value) && !value.startsWith("1.")) return 25;
+  return 21;
+}
+
+async function ensureManagedJava(requiredMajor) {
+  if (requiredMajor <= 21) return null;
+
+  const runtimeRoot = path.join(MANAGED_RUNTIME_DIR, `java-${requiredMajor}`);
+  const existing = findJavaInDirectory(runtimeRoot, requiredMajor);
+  if (existing) return existing;
+
+  ensureDir(MANAGED_RUNTIME_DIR);
+  fs.rmSync(runtimeRoot, { recursive: true, force: true });
+  ensureDir(runtimeRoot);
+
+  const archivePath = path.join(MANAGED_RUNTIME_DIR, `java-${requiredMajor}.zip`);
+  const url = `https://api.adoptium.net/v3/binary/latest/${requiredMajor}/ga/windows/x64/jre/hotspot/normal/eclipse?project=jdk`;
+  appendLog(`[java] Downloading Java ${requiredMajor} runtime for snapshot support...`);
+  fs.rmSync(archivePath, { force: true });
+  await ensureFile(url, archivePath);
+
+  const expandedRoot = path.join(runtimeRoot, "expanded");
+  fs.rmSync(expandedRoot, { recursive: true, force: true });
+  ensureDir(expandedRoot);
+  const expandResult = spawnSync(
+    "powershell",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "Expand-Archive", "-LiteralPath", archivePath, "-DestinationPath", expandedRoot, "-Force"],
+    { encoding: "utf8" }
+  );
+  if (expandResult.status !== 0) {
+    throw new Error(`Could not install Java ${requiredMajor}: ${expandResult.stderr || expandResult.stdout || "archive extraction failed"}`);
+  }
+
+  const javaPath = findJavaInDirectory(expandedRoot, requiredMajor);
+  if (!javaPath) throw new Error(`Java ${requiredMajor} downloaded, but java.exe was not found.`);
+  appendLog(`[java] Installed Java ${requiredMajor} runtime at ${javaPath}`);
+  return javaPath;
+}
+
+async function findJavaExecutable(customPath, minecraftRoot, minecraftVersion) {
+  const requiredMajor = getRequiredJavaMajor(minecraftVersion);
+  if (customPath && fs.existsSync(customPath)) {
+    const customMajor = getJavaMajorVersion(customPath);
+    if (!requiredMajor || customMajor >= requiredMajor) return customPath;
+    appendLog(`[java] Custom Java is version ${customMajor || "unknown"}, but ${minecraftVersion} needs Java ${requiredMajor}+. Looking for a newer runtime.`);
+  }
 
   const rootKey = sanitizePathSegment(minecraftRoot || DEFAULT_ROOT, "default-root");
-  const cachedJava = readCacheEntry(`java-path-${rootKey}`, 30 * 24 * 60 * 60 * 1000);
-  if (typeof cachedJava === "string" && cachedJava && fs.existsSync(cachedJava)) {
+  const cacheKey = `java-path-${rootKey}-${requiredMajor}`;
+  const cachedJava = readCacheEntry(cacheKey, 30 * 24 * 60 * 60 * 1000);
+  if (typeof cachedJava === "string" && cachedJava && fs.existsSync(cachedJava) && getJavaMajorVersion(cachedJava) >= requiredMajor) {
     return cachedJava;
   }
 
+  const managedJava = await ensureManagedJava(requiredMajor);
+  if (managedJava) {
+    writeCacheEntry(cacheKey, managedJava);
+    return managedJava;
+  }
+
   const runtimePath = path.join(minecraftRoot, "runtime");
-  const runtimeJava = findJavaInDirectory(runtimePath);
+  const runtimeJava = findJavaInDirectory(runtimePath, requiredMajor);
   if (runtimeJava) {
-    writeCacheEntry(`java-path-${rootKey}`, runtimeJava);
+    writeCacheEntry(cacheKey, runtimeJava);
     return runtimeJava;
   }
 
   if (process.env.JAVA_HOME) {
     const javaHomePath = path.join(process.env.JAVA_HOME, "bin", "java.exe");
-    if (fs.existsSync(javaHomePath)) {
-      writeCacheEntry(`java-path-${rootKey}`, javaHomePath);
+    if (fs.existsSync(javaHomePath) && getJavaMajorVersion(javaHomePath) >= requiredMajor) {
+      writeCacheEntry(cacheKey, javaHomePath);
       return javaHomePath;
     }
   }
@@ -1591,24 +1673,24 @@ function findJavaExecutable(customPath, minecraftRoot) {
   ];
 
   for (const directory of programFiles) {
-    const found = findJavaInDirectory(directory);
+    const found = findJavaInDirectory(directory, requiredMajor);
     if (found) {
-      writeCacheEntry(`java-path-${rootKey}`, found);
+      writeCacheEntry(cacheKey, found);
       return found;
     }
   }
 
   const whereJava = spawnSync("where", ["java"], { encoding: "utf8" });
   if (whereJava.status === 0) {
-    const first = whereJava.stdout.split(/\r?\n/).find(Boolean);
+    const first = whereJava.stdout.split(/\r?\n/).find((entry) => getJavaMajorVersion(entry.trim()) >= requiredMajor);
     if (first) {
       const resolved = first.trim();
-      writeCacheEntry(`java-path-${rootKey}`, resolved);
+      writeCacheEntry(cacheKey, resolved);
       return resolved;
     }
   }
 
-  throw new Error("Java was not found. Install Java or the official Minecraft Launcher first, or set a custom Java path.");
+  throw new Error(`Java ${requiredMajor}+ was not found. Install Java ${requiredMajor}+ or clear the custom Java path so Zen Client can download its managed runtime.`);
 }
 
 async function ensureFile(url, targetPath) {
@@ -2201,7 +2283,7 @@ async function launchGame(settings) {
   ensureDir(minecraftRoot);
 
   const authorization = await resolveAuth(account);
-  const javaPath = findJavaExecutable(settings.javaPath, baseMinecraftRoot);
+  const javaPath = await findJavaExecutable(settings.javaPath, baseMinecraftRoot, settings.minecraftVersion);
   appendLog(`[launch] Using Java at ${javaPath}`);
   if (minecraftRoot !== baseMinecraftRoot) {
     appendLog(`[launch] Using isolated instance folder ${minecraftRoot}`);
