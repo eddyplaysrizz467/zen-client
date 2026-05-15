@@ -1300,8 +1300,9 @@ function neoforgeLoaderToMinecraftVersion(loaderVersion) {
 
 function isModernMinecraftRelease(version) {
   const value = String(version || "").trim();
-  if (!/^1\.\d+(?:\.\d+)?$/.test(value)) return false;
-  return compareMcVersions(value, "1.8.9") >= 0;
+  if (!/^\d+\.\d+(?:\.\d+)?$/.test(value)) return false;
+  if (value.startsWith("1.")) return compareMcVersions(value, "1.8.9") >= 0;
+  return true;
 }
 
 const MIN_SUPPORTED_SNAPSHOT_RELEASE_TIME = Date.parse("2018-10-24T00:00:00Z"); // 18w43a, first 1.14 snapshot.
@@ -1318,6 +1319,13 @@ function isModernSnapshotName(version) {
 
   const prerelease = value.match(/^(1\.\d+(?:\.\d+)?)-(pre|rc)\d+$/i);
   if (prerelease) return compareMcVersions(prerelease[1], "1.14") >= 0;
+
+  const namedSnapshot = value.match(/^(\d+\.\d+(?:\.\d+)?)-(snapshot|pre|rc)-?\d+$/i);
+  if (namedSnapshot) {
+    const baseVersion = namedSnapshot[1];
+    if (baseVersion.startsWith("1.")) return compareMcVersions(baseVersion, "1.14") >= 0;
+    return true;
+  }
 
   return false;
 }
