@@ -6,8 +6,8 @@ const root = path.resolve(__dirname, "..");
 const modDir = path.join(root, "zen-client-mod");
 const libsDir = path.join(modDir, "build", "libs");
 const bundledDir = path.join(root, "bundled-mods");
-const bundledJar = path.join(bundledDir, "zen-client-fabric.jar");
 const gradlePropsPath = path.join(modDir, "gradle.properties");
+const bundleManifestPath = path.join(bundledDir, "zen-client-bundles.json");
 
 function readGradleProperty(name) {
   if (!fs.existsSync(gradlePropsPath)) return "";
@@ -47,11 +47,47 @@ function pickJar() {
 runBuild();
 fs.mkdirSync(bundledDir, { recursive: true });
 const sourceJar = pickJar();
-fs.copyFileSync(sourceJar, bundledJar);
 const minecraftVersion = readGradleProperty("minecraft_version");
-if (minecraftVersion) {
-  const versionedJar = path.join(bundledDir, `zen-client-fabric-${minecraftVersion}.jar`);
-  fs.copyFileSync(sourceJar, versionedJar);
-  console.log(`[zen-mod] bundled ${path.basename(sourceJar)} -> ${versionedJar}`);
+
+const bundles = [
+  {
+    loader: "fabric",
+    minecraftVersion: minecraftVersion || "",
+    file: minecraftVersion ? `zen-client-fabric-${minecraftVersion}.jar` : "zen-client-fabric.jar",
+    targetName: "zen-client-fabric.jar",
+    requiredMods: ["fabric-api"]
+  },
+  {
+    loader: "quilt",
+    minecraftVersion: minecraftVersion || "",
+    file: minecraftVersion ? `zen-client-quilt-${minecraftVersion}.jar` : "zen-client-quilt.jar",
+    targetName: "zen-client-quilt.jar",
+    requiredMods: ["fabric-api"],
+    notes: "Uses the Fabric-compatible Zen mod bundle on Quilt."
+  }
+];
+
+for (const bundle of bundles) {
+  const target = path.join(bundledDir, bundle.file);
+  fs.copyFileSync(sourceJar, target);
+  console.log(`[zen-mod] bundled ${path.basename(sourceJar)} -> ${target}`);
+
+  const unversionedTarget = path.join(bundledDir, bundle.targetName);
+  fs.copyFileSync(sourceJar, unversionedTarget);
+  console.log(`[zen-mod] bundled ${path.basename(sourceJar)} -> ${unversionedTarget}`);
 }
-console.log(`[zen-mod] bundled ${path.basename(sourceJar)} -> ${bundledJar}`);
+
+fs.writeFileSync(
+  bundleManifestPath,
+  `${JSON.stringify(
+    {
+      generatedAt: new Date().toISOString(),
+      sourceJar: path.basename(sourceJar),
+      bundles
+    },
+    null,
+    2
+  )}\n`,
+  "utf8"
+);
+console.log(`[zen-mod] wrote bundle manifest -> ${bundleManifestPath}`);

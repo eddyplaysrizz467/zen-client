@@ -20,12 +20,13 @@ const OPTIMIZATION_DIR = path.join(APP_DIR, "optimizations");
 const OPTIMIZATION_STATE_FILE = path.join(OPTIMIZATION_DIR, "applied.json");
 const OPTIMIZATION_HISTORY_FILE = path.join(OPTIMIZATION_DIR, "history.log");
 const DEFAULT_DISCORD_APP_ID = "1496668054803714058";
+const ZEN_CLIENT_BUNDLE_MANIFEST_FILENAME = "zen-client-bundles.json";
 const ZEN_CLIENT_MOD_FILENAME = "zen-client-fabric.jar";
 const ZEN_CLIENT_MOD_FILENAME_TEMPLATE = "zen-client-fabric-%VERSION%.jar";
 const AUTH_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
-const ZEN_CLIENT_REQUIRED_MODS = [
-  { slug: "fabric-api", label: "Fabric API" }
-];
+const ZEN_CLIENT_REQUIRED_MOD_LABELS = {
+  "fabric-api": "Fabric API"
+};
 
 let mainWindow = null;
 let launchClient = null;
@@ -907,6 +908,89 @@ function getBundledZenModCandidates(minecraftVersion) {
     app.isPackaged ? path.join(process.resourcesPath, "bundled-mods", ZEN_CLIENT_MOD_FILENAME) : null,
     path.join(__dirname, "bundled-mods", ZEN_CLIENT_MOD_FILENAME)
   ].filter(Boolean);
+}
+
+function getBundledZenBundleManifestCandidates() {
+  return [
+    app.isPackaged ? path.join(process.resourcesPath, "bundled-mods", ZEN_CLIENT_BUNDLE_MANIFEST_FILENAME) : null,
+    path.join(__dirname, "bundled-mods", ZEN_CLIENT_BUNDLE_MANIFEST_FILENAME)
+  ].filter(Boolean);
+}
+
+function readBundledZenBundleManifest() {
+  for (const candidate of getBundledZenBundleManifestCandidates()) {
+    try {
+      if (!fs.existsSync(candidate)) continue;
+      const parsed = JSON.parse(fs.readFileSync(candidate, "utf8"));
+      if (parsed && Array.isArray(parsed.bundles)) return parsed;
+    } catch {
+      // Keep looking for another manifest candidate.
+    }
+  }
+  return null;
+}
+
+function normalizeZenModLoader(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "fabric") return "fabric";
+  if (normalized === "quilt") return "quilt";
+  if (normalized === "forge") return "forge";
+  if (normalized === "neoforge") return "neoforge";
+  return "";
+}
+
+function getBundledZenBundleSpec(launchType, minecraftVersion) {
+  const loader = normalizeZenModLoader(launchType);
+  const version = String(minecraftVersion || "").trim();
+  if (!loader) return null;
+
+  const manifest = readBundledZenBundleManifest();
+  if (manifest?.bundles?.length) {
+    const exact = manifest.bundles.find((bundle) =>
+      String(bundle.loader || "").toLowerCase() === loader &&
+      String(bundle.minecraftVersion || "").trim() === version
+    );
+    if (exact) {
+      return {
+        ...exact,
+        loader,
+        minecraftVersion: version
+      };
+    }
+
+    const loaderOnly = manifest.bundles.find((bundle) =>
+      String(bundle.loader || "").toLowerCase() === loader &&
+      !String(bundle.minecraftVersion || "").trim()
+    );
+    if (loaderOnly) {
+      return {
+        ...loaderOnly,
+        loader,
+        minecraftVersion: version
+      };
+    }
+  }
+
+  if (loader === "fabric") {
+    return {
+      loader,
+      minecraftVersion: version,
+      file: version ? ZEN_CLIENT_MOD_FILENAME_TEMPLATE.replace("%VERSION%", version) : ZEN_CLIENT_MOD_FILENAME,
+      targetName: ZEN_CLIENT_MOD_FILENAME,
+      requiredMods: ["fabric-api"]
+    };
+  }
+
+  return null;
+}
+
+function getBundledZenBundleSourcePath(bundleSpec) {
+  if (!bundleSpec?.file) return null;
+  const candidates = [
+    app.isPackaged ? path.join(process.resourcesPath, "bundled-mods", bundleSpec.file) : null,
+    path.join(__dirname, "bundled-mods", bundleSpec.file)
+  ].filter(Boolean);
+  return pickNewestFile(candidates);
 }
 
 function sanitizeAccount(account) {
@@ -1856,21 +1940,23 @@ async function ensureModrinthMods(minecraftRoot, minecraftVersion, launchType) {
 }
 
 async function ensureZenClientDependencies(minecraftRoot, minecraftVersion, launchType) {
-  const selected = String(launchType || "").toLowerCase();
-  if (selected !== "fabric" && selected !== "quilt") return;
+  const selected = normalizeZenModLoader(launchType);
+  const bundleSpec = getBundledZenBundleSpec(selected, minecraftVersion);
+  if (!bundleSpec) return;
 
   const modsDir = path.join(minecraftRoot, "mods");
   ensureDir(modsDir);
 
-  for (const mod of ZEN_CLIENT_REQUIRED_MODS) {
-    const target = path.join(modsDir, `${mod.slug}.jar`);
+  for (const slug of bundleSpec.requiredMods || []) {
+    const label = ZEN_CLIENT_REQUIRED_MOD_LABELS[slug] || slug;
+    const target = path.join(modsDir, `${slug}.jar`);
     if (fs.existsSync(target)) continue;
 
     try {
-      appendLog(`[zen-mod] Resolving dependency ${mod.label}...`);
-      const download = await modrinthPickDownload(mod.slug, minecraftVersion, launchType);
+      appendLog(`[zen-mod] Resolving dependency ${label}...`);
+      const download = await modrinthPickDownload(slug, minecraftVersion, launchType);
       if (!download) {
-        appendLog(`[zen-mod] No compatible ${mod.label} build was found for ${selected} ${minecraftVersion}.`);
+        appendLog(`[zen-mod] No compatible ${label} build was found for ${selected} ${minecraftVersion}.`);
         continue;
       }
       await ensureFile(download.url, target);
@@ -1878,16 +1964,19 @@ async function ensureZenClientDependencies(minecraftRoot, minecraftVersion, laun
         projectType: "mod",
         loader: selected,
         minecraftVersion,
-        slug: mod.slug
+        slug
       });
-      appendLog(`[zen-mod] Installed dependency ${mod.label} -> ${path.basename(target)}`);
+      appendLog(`[zen-mod] Installed dependency ${label} -> ${path.basename(target)}`);
     } catch (error) {
-      appendLog(`[zen-mod] Failed to install dependency ${mod.label}: ${error?.message || String(error)}`);
+      appendLog(`[zen-mod] Failed to install dependency ${label}: ${error?.message || String(error)}`);
     }
   }
 }
 
-function resolveBundledZenClientModPath(minecraftVersion) {
+function resolveBundledZenClientModPath(bundleSpec, minecraftVersion) {
+  const manifestPath = getBundledZenBundleSourcePath(bundleSpec);
+  if (manifestPath) return manifestPath;
+
   const directCandidates = getBundledZenModCandidates(minecraftVersion);
 
   const direct = pickNewestFile(directCandidates);
@@ -1907,18 +1996,37 @@ function resolveBundledZenClientModPath(minecraftVersion) {
 }
 
 async function ensureZenClientMod(minecraftRoot, launchType, minecraftVersion) {
-  const selected = String(launchType || "").toLowerCase();
-  if (selected !== "fabric" && selected !== "quilt") return;
+  const selected = normalizeZenModLoader(launchType);
+  if (!selected || selected === "vanilla") return;
 
-  const source = resolveBundledZenClientModPath(minecraftVersion);
+  const bundleSpec = getBundledZenBundleSpec(selected, minecraftVersion);
+  if (!bundleSpec) {
+    appendLog(`[zen-mod] No Zen Client in-game bundle is available for ${selected} ${minecraftVersion}. Skipping in-game Zen features for this combination.`);
+    return;
+  }
+
+  const source = resolveBundledZenClientModPath(bundleSpec, minecraftVersion);
   if (!source) {
-    appendLog("[zen-mod] No bundled Zen Client mod was found. Skipping auto-install.");
+    appendLog(`[zen-mod] Expected a bundled Zen Client mod for ${selected} ${minecraftVersion}, but no bundle file was found.`);
     return;
   }
 
   const modsDir = path.join(minecraftRoot, "mods");
   ensureDir(modsDir);
-  const target = path.join(modsDir, ZEN_CLIENT_MOD_FILENAME);
+  const targetName = String(bundleSpec.targetName || `zen-client-${selected}.jar`).trim() || `zen-client-${selected}.jar`;
+  const target = path.join(modsDir, targetName);
+
+  for (const staleName of ["zen-client-fabric.jar", "zen-client-quilt.jar", "zen-client-forge.jar", "zen-client-neoforge.jar"]) {
+    if (staleName === targetName) continue;
+    const stalePath = path.join(modsDir, staleName);
+    if (fs.existsSync(stalePath)) {
+      try {
+        fs.unlinkSync(stalePath);
+      } catch {
+        // ignore cleanup failures
+      }
+    }
+  }
 
   const sourceStat = fs.statSync(source);
   const targetStat = fs.existsSync(target) ? fs.statSync(target) : null;
@@ -1938,8 +2046,8 @@ async function ensureZenClientMod(minecraftRoot, launchType, minecraftVersion) {
   recordInstalledModrinthFile(minecraftRoot, path.basename(target), {
     projectType: "mod",
     loader: selected,
-    minecraftVersion: "",
-    slug: "zen-client-fabric"
+    minecraftVersion,
+    slug: `zen-client-${selected}`
   });
   appendLog(`[zen-mod] Installed bundled Zen Client mod for ${selected} -> ${path.basename(target)}`);
 }
