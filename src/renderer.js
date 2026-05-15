@@ -22,6 +22,10 @@ const panelOptimize = document.getElementById("panelOptimize");
 
 const launchType = document.getElementById("launchType");
 const minecraftVersion = document.getElementById("minecraftVersion");
+const launchTypePicker = document.getElementById("launchTypePicker");
+const launchTypeMenu = document.getElementById("launchTypeMenu");
+const minecraftVersionPicker = document.getElementById("minecraftVersionPicker");
+const minecraftVersionMenu = document.getElementById("minecraftVersionMenu");
 const showSnapshots = document.getElementById("showSnapshots");
 const memoryMb = document.getElementById("memoryMb");
 const minecraftDirectory = document.getElementById("minecraftDirectory");
@@ -80,6 +84,7 @@ let optimizations = [];
 let optimizationBusy = false;
 let bootFinished = false;
 let loadingFinished = false;
+let activeEnhancedSelect = null;
 const activeBamboo = new Map();
 const BAMBOO_COUNT = 5;
 
@@ -235,6 +240,71 @@ function loaderKey(value) {
   return "vanilla";
 }
 
+function setNativeSelectValue(selectElement, value) {
+  const nextValue = String(value || "");
+  const option = Array.from(selectElement.options).find((item) => item.value === nextValue || item.textContent === nextValue);
+  if (option) {
+    selectElement.value = option.value;
+  }
+}
+
+function closeEnhancedSelect() {
+  if (!activeEnhancedSelect) return;
+  activeEnhancedSelect.menu.hidden = true;
+  activeEnhancedSelect.trigger.setAttribute("aria-expanded", "false");
+  activeEnhancedSelect = null;
+}
+
+function toggleEnhancedSelect(trigger, menu, selectElement) {
+  if (activeEnhancedSelect?.menu === menu) {
+    closeEnhancedSelect();
+    return;
+  }
+  closeEnhancedSelect();
+  renderEnhancedSelectMenu(selectElement, trigger, menu);
+  menu.hidden = false;
+  trigger.setAttribute("aria-expanded", "true");
+  activeEnhancedSelect = { trigger, menu, selectElement };
+}
+
+function renderEnhancedSelectMenu(selectElement, trigger, menu) {
+  const selectedValue = selectElement.value;
+  menu.innerHTML = "";
+  Array.from(selectElement.options).forEach((option) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `enhanced-select-option${option.value === selectedValue ? " selected" : ""}`;
+    button.setAttribute("role", "option");
+    button.setAttribute("aria-selected", option.value === selectedValue ? "true" : "false");
+    button.textContent = option.textContent;
+    button.addEventListener("click", () => {
+      selectElement.value = option.value;
+      selectElement.dispatchEvent(new Event("change", { bubbles: true }));
+      closeEnhancedSelect();
+    });
+    menu.appendChild(button);
+  });
+
+  requestAnimationFrame(() => {
+    const selected = menu.querySelector(".enhanced-select-option.selected");
+    if (selected) selected.scrollIntoView({ block: "nearest" });
+  });
+  updateEnhancedSelectTrigger(selectElement, trigger);
+}
+
+function updateEnhancedSelectTrigger(selectElement, trigger) {
+  const selected = selectElement.selectedOptions?.[0];
+  trigger.textContent = selected?.textContent || "Choose";
+}
+
+function syncEnhancedSelects() {
+  updateEnhancedSelectTrigger(launchType, launchTypePicker);
+  updateEnhancedSelectTrigger(minecraftVersion, minecraftVersionPicker);
+  if (activeEnhancedSelect) {
+    renderEnhancedSelectMenu(activeEnhancedSelect.selectElement, activeEnhancedSelect.trigger, activeEnhancedSelect.menu);
+  }
+}
+
 function getSelectedAccount() {
   return state?.accounts.find((account) => account.id === state.selectedAccountId) || null;
 }
@@ -270,7 +340,7 @@ function renderAccounts() {
 
 function renderSettings() {
   if (!state) return;
-  launchType.value = state.settings.launchType || "Vanilla";
+  setNativeSelectValue(launchType, state.settings.launchType || "Vanilla");
   showSnapshots.checked = Boolean(state.settings.showSnapshots);
   memoryMb.value = state.settings.memoryMb || 4096;
   minecraftDirectory.value = state.settings.minecraftDirectory || "";
@@ -279,6 +349,7 @@ function renderSettings() {
   discordShowLauncher.value = state.settings.discordShowLauncher ? "on" : "off";
   discordShowPlaying.value = state.settings.discordShowPlaying ? "on" : "off";
   renderVersions();
+  syncEnhancedSelects();
 }
 
 function renderVersions() {
@@ -298,6 +369,7 @@ function renderVersions() {
   } else if (items.length) {
     minecraftVersion.value = items[0];
   }
+  syncEnhancedSelects();
 }
 
 function renderHero() {
@@ -576,8 +648,23 @@ tabLibrary.addEventListener("click", () => setActiveTab("library"));
 tabSkins.addEventListener("click", () => setActiveTab("skins"));
 tabOptimize.addEventListener("click", () => setActiveTab("optimize"));
 
+launchTypePicker.addEventListener("click", () => toggleEnhancedSelect(launchTypePicker, launchTypeMenu, launchType));
+minecraftVersionPicker.addEventListener("click", () => toggleEnhancedSelect(minecraftVersionPicker, minecraftVersionMenu, minecraftVersion));
+
+document.addEventListener("click", (event) => {
+  if (!activeEnhancedSelect) return;
+  const target = event.target;
+  if (activeEnhancedSelect.trigger.contains(target) || activeEnhancedSelect.menu.contains(target)) return;
+  closeEnhancedSelect();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeEnhancedSelect();
+});
+
 launchType.addEventListener("change", async () => {
   renderVersions();
+  syncEnhancedSelects();
   await saveSettings();
   if (localStorage.getItem("aeroTab") === "optimize") loadOptimizations().catch(() => {});
 });
@@ -585,6 +672,7 @@ launchType.addEventListener("change", async () => {
 [memoryMb, minecraftDirectory, javaPath, showSnapshots, discordEnabled, discordShowLauncher, discordShowPlaying].forEach((element) => {
   element.addEventListener("change", async () => {
     if (element === showSnapshots) renderVersions();
+    syncEnhancedSelects();
     await saveSettings();
     if ((element === minecraftDirectory || element === javaPath) && localStorage.getItem("aeroTab") === "optimize") {
       loadOptimizations().catch(() => {});
@@ -599,6 +687,7 @@ minecraftDirectory.addEventListener("change", () => {
 });
 
 minecraftVersion.addEventListener("change", async () => {
+  syncEnhancedSelects();
   await saveSettings();
   if (localStorage.getItem("aeroTab") === "optimize") loadOptimizations().catch(() => {});
 });

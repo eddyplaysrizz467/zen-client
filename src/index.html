@@ -100,7 +100,7 @@
             <div class="settings-grid">
               <label class="select-field">
                 Launch type
-                <span class="select-shell">
+                <span class="select-shell enhanced-select-shell" data-enhanced-select="launchType">
                   <select id="launchType">
                     <option>Vanilla</option>
                     <option>Fabric</option>
@@ -108,13 +108,17 @@
                     <option>Forge</option>
                     <option>NeoForge</option>
                   </select>
+                  <button id="launchTypePicker" class="enhanced-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false"></button>
+                  <div id="launchTypeMenu" class="enhanced-select-menu" role="listbox" hidden></div>
                 </span>
               </label>
 
               <label class="select-field">
                 Minecraft version
-                <span class="select-shell">
+                <span class="select-shell enhanced-select-shell" data-enhanced-select="minecraftVersion">
                   <select id="minecraftVersion"></select>
+                  <button id="minecraftVersionPicker" class="enhanced-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false"></button>
+                  <div id="minecraftVersionMenu" class="enhanced-select-menu version-menu" role="listbox" hidden></div>
                 </span>
               </label>
 
