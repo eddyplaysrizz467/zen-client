@@ -13,11 +13,13 @@ const tabLauncher = document.getElementById("tabLauncher");
 const tabSettings = document.getElementById("tabSettings");
 const tabLibrary = document.getElementById("tabLibrary");
 const tabSkins = document.getElementById("tabSkins");
+const tabFriends = document.getElementById("tabFriends");
 const tabOptimize = document.getElementById("tabOptimize");
 const panelLauncher = document.getElementById("panelLauncher");
 const panelSettings = document.getElementById("panelSettings");
 const panelLibrary = document.getElementById("panelLibrary");
 const panelSkins = document.getElementById("panelSkins");
+const panelFriends = document.getElementById("panelFriends");
 const panelOptimize = document.getElementById("panelOptimize");
 
 const launchType = document.getElementById("launchType");
@@ -56,6 +58,12 @@ const modsList = document.getElementById("modsList");
 const packsList = document.getElementById("packsList");
 const refreshOptimizationsButton = document.getElementById("refreshOptimizationsButton");
 const optimizationsList = document.getElementById("optimizationsList");
+const refreshFriendsButton = document.getElementById("refreshFriendsButton");
+const hostAddressText = document.getElementById("hostAddressText");
+const friendForm = document.getElementById("friendForm");
+const friendName = document.getElementById("friendName");
+const friendAddress = document.getElementById("friendAddress");
+const friendsList = document.getElementById("friendsList");
 
 const microsoftButton = document.getElementById("microsoftButton");
 const removeAccountButton = document.getElementById("removeAccountButton");
@@ -102,7 +110,8 @@ function setBusy(nextBusy) {
     openPacksFolderButton,
     refreshModsButton,
     refreshPacksButton,
-    refreshOptimizationsButton
+    refreshOptimizationsButton,
+    refreshFriendsButton
   ].forEach((button) => {
     button.disabled = nextBusy;
   });
@@ -385,6 +394,65 @@ function renderHero() {
   }
 }
 
+async function loadFriendsHostInfo() {
+  if (!hostAddressText) return;
+  hostAddressText.textContent = "Checking...";
+  try {
+    const info = await window.aeroApi.getFriendsHostInfo();
+    hostAddressText.textContent = info.localAddress || "No local network address found";
+  } catch (error) {
+    hostAddressText.textContent = `Problem: ${error.message}`;
+  }
+}
+
+function renderFriends() {
+  if (!friendsList) return;
+  const friends = Array.isArray(state?.friends) ? state.friends : [];
+  friendsList.innerHTML = "";
+  if (!friends.length) {
+    friendsList.innerHTML = `<div class="empty-state">No friends saved yet.</div>`;
+    return;
+  }
+
+  friends.forEach((friend) => {
+    const card = document.createElement("div");
+    card.className = "friend-card";
+    const name = document.createElement("div");
+    name.className = "friend-name";
+    name.textContent = friend.name || "Friend";
+    const address = document.createElement("button");
+    address.className = "friend-address";
+    address.type = "button";
+    address.textContent = friend.address || "";
+    address.title = "Copy join address";
+    address.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(friend.address || "");
+      statusText.textContent = `Copied ${friend.address}`;
+    });
+    const actions = document.createElement("div");
+    actions.className = "friend-actions";
+    const copy = document.createElement("button");
+    copy.className = "ghost";
+    copy.type = "button";
+    copy.textContent = "Copy";
+    copy.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(friend.address || "");
+      statusText.textContent = `Copied ${friend.address}`;
+    });
+    const remove = document.createElement("button");
+    remove.className = "ghost";
+    remove.type = "button";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", async () => {
+      state = await window.aeroApi.removeFriend(friend.id);
+      renderFriends();
+    });
+    actions.append(copy, remove);
+    card.append(name, address, actions);
+    friendsList.appendChild(card);
+  });
+}
+
 function isSnapshotVersion(version) {
   const value = String(version || "").trim().toLowerCase();
   if (!value) return false;
@@ -571,6 +639,7 @@ function syncFromState(nextState) {
   renderSettings();
   renderHero();
   renderUpdateNotice();
+  renderFriends();
   updateSkinControls();
 }
 
@@ -628,6 +697,7 @@ function setActiveTab(tabName) {
     { name: "settings", button: tabSettings, panel: panelSettings },
     { name: "library", button: tabLibrary, panel: panelLibrary },
     { name: "skins", button: tabSkins, panel: panelSkins },
+    { name: "friends", button: tabFriends, panel: panelFriends },
     { name: "optimize", button: tabOptimize, panel: panelOptimize }
   ];
   tabs.forEach(({ name, button, panel }) => {
@@ -638,6 +708,7 @@ function setActiveTab(tabName) {
   });
   localStorage.setItem("aeroTab", tabName);
   if (tabName === "skins") renderSkinHead();
+  if (tabName === "friends") loadFriendsHostInfo().catch(() => {});
   if (tabName === "library") ensureLibraryLoaded().catch(() => {});
   if (tabName === "optimize") loadOptimizations().catch(() => {});
 }
@@ -646,6 +717,7 @@ tabLauncher.addEventListener("click", () => setActiveTab("launcher"));
 tabSettings.addEventListener("click", () => setActiveTab("settings"));
 tabLibrary.addEventListener("click", () => setActiveTab("library"));
 tabSkins.addEventListener("click", () => setActiveTab("skins"));
+tabFriends.addEventListener("click", () => setActiveTab("friends"));
 tabOptimize.addEventListener("click", () => setActiveTab("optimize"));
 
 launchTypePicker.addEventListener("click", () => toggleEnhancedSelect(launchTypePicker, launchTypeMenu, launchType));
@@ -660,6 +732,29 @@ document.addEventListener("click", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeEnhancedSelect();
+});
+
+refreshFriendsButton.addEventListener("click", () => {
+  loadFriendsHostInfo().catch(() => {});
+});
+
+friendForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  setBusy(true);
+  try {
+    state = await window.aeroApi.addFriend({
+      name: friendName.value,
+      address: friendAddress.value
+    });
+    friendName.value = "";
+    friendAddress.value = "";
+    renderFriends();
+    statusText.textContent = "Friend saved.";
+  } catch (error) {
+    statusText.textContent = `Problem: ${error.message}`;
+  } finally {
+    setBusy(false);
+  }
 });
 
 launchType.addEventListener("change", async () => {

@@ -51,6 +51,7 @@
         <button id="tabSettings" class="tab-button" type="button">Settings</button>
         <button id="tabLibrary" class="tab-button" type="button">Mods & Packs</button>
         <button id="tabSkins" class="tab-button" type="button">Skins</button>
+        <button id="tabFriends" class="tab-button" type="button">Friends</button>
         <button id="tabOptimize" class="tab-button" type="button">Optimize</button>
       </nav>
 
@@ -281,6 +282,47 @@
                 <div id="skinUploadMeta" class="skin-upload-meta">Choose a PNG skin file to upload for the selected Microsoft account.</div>
                 <div class="hint">Preview uses public skin render services. If your skin just changed, it can take a bit to update.</div>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="panelFriends" class="tab-panel" aria-label="Friends panel">
+          <div class="card friends-card">
+            <div class="card-head">
+              <h2>Zen Friends</h2>
+              <p>Save friend join addresses and host singleplayer worlds from the Zen Client mod.</p>
+            </div>
+
+            <div class="friends-grid">
+              <div class="friend-host-card">
+                <div class="library-title">Host from this PC</div>
+                <div class="friend-code-box">
+                  <div>
+                    <div class="friend-code-label">Local address</div>
+                    <div id="hostAddressText" class="friend-code-value">Checking...</div>
+                  </div>
+                  <button id="refreshFriendsButton" class="ghost" type="button">Refresh</button>
+                </div>
+                <div class="hint">In a singleplayer world, press Esc and use Host Zen LAN. Friends on the same Wi-Fi can join with the address above plus the LAN port shown in Minecraft chat.</div>
+                <div class="hint">For friends outside your Wi-Fi, use port forwarding, a VPN, or a tunnel, then save that public address below.</div>
+              </div>
+
+              <form id="friendForm" class="friend-form">
+                <div class="library-title">Add friend server</div>
+                <label>
+                  Friend name
+                  <input id="friendName" type="text" placeholder="Friend name" />
+                </label>
+                <label>
+                  Join address
+                  <input id="friendAddress" type="text" placeholder="ip-or-domain:port" />
+                </label>
+                <button class="primary wide" type="submit">Save friend</button>
+              </form>
+            </div>
+
+            <div id="friendsList" class="friends-list">
+              <div class="empty-state">No friends saved yet.</div>
             </div>
           </div>
         </section>

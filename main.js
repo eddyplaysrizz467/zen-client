@@ -568,6 +568,7 @@ function defaultState() {
   return {
     accounts: [],
     selectedAccountId: null,
+    friends: [],
     settings: {
       launchType: "Vanilla",
       minecraftVersion: "",
@@ -604,6 +605,8 @@ function loadState() {
     const merged = {
       ...defaultState(),
       ...raw,
+      accounts: Array.isArray(raw.accounts) ? raw.accounts : [],
+      friends: Array.isArray(raw.friends) ? raw.friends : [],
       settings: {
         ...defaultState().settings,
         ...(raw.settings || {})
@@ -1229,6 +1232,7 @@ function getClientState() {
   const state = loadState();
   return {
     accounts: state.accounts.map(sanitizeAccount),
+    friends: state.friends || [],
     selectedAccountId: state.selectedAccountId,
     settings: state.settings,
     log: logBuffer,
@@ -1273,6 +1277,47 @@ function selectAccount(accountId) {
     draft.selectedAccountId = accountId;
   });
   sendEvent("state-updated", getClientState());
+}
+
+function sanitizeFriend(friend) {
+  return {
+    id: String(friend?.id || crypto.randomUUID()),
+    name: String(friend?.name || "Friend").trim() || "Friend",
+    address: String(friend?.address || "").trim()
+  };
+}
+
+function addFriend(payload) {
+  const name = String(payload?.name || "").trim();
+  const address = String(payload?.address || "").trim();
+  if (!name) throw new Error("Type a friend name.");
+  if (!address || !/^[a-z0-9._:-]+$/i.test(address)) throw new Error("Type a join address like 192.168.1.25:52341.");
+
+  updateState((draft) => {
+    const friend = sanitizeFriend({ id: crypto.randomUUID(), name, address });
+    draft.friends = Array.isArray(draft.friends) ? draft.friends : [];
+    draft.friends.push(friend);
+  });
+  sendEvent("state-updated", getClientState());
+  return getClientState();
+}
+
+function removeFriend(friendId) {
+  updateState((draft) => {
+    draft.friends = (draft.friends || []).filter((friend) => friend.id !== friendId);
+  });
+  sendEvent("state-updated", getClientState());
+  return getClientState();
+}
+
+function getPrimaryLocalAddress() {
+  const interfaces = os.networkInterfaces();
+  for (const entries of Object.values(interfaces)) {
+    for (const entry of entries || []) {
+      if (entry.family === "IPv4" && !entry.internal) return entry.address;
+    }
+  }
+  return "";
 }
 
 function saveSettings(settings) {
@@ -2578,6 +2623,15 @@ ipcMain.handle("account:remove", async (_event, accountId) => {
 ipcMain.handle("account:select", async (_event, accountId) => {
   selectAccount(accountId);
   return getClientState();
+});
+ipcMain.handle("friends:add", async (_event, payload) => addFriend(payload));
+ipcMain.handle("friends:remove", async (_event, friendId) => removeFriend(String(friendId || "")));
+ipcMain.handle("friends:hostInfo", async () => {
+  const address = getPrimaryLocalAddress();
+  return {
+    localAddress: address ? `${address}:<LAN port>` : "",
+    note: "Use Host Zen LAN in-game, then replace <LAN port> with the port Minecraft shows in chat."
+  };
 });
 ipcMain.handle("account:microsoftLogin", async () => {
   const account = await microsoftSignIn();

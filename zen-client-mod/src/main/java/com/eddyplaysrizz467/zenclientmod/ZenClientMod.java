@@ -19,11 +19,14 @@ import net.fabricmc.fabric.api.client.screen.v1.Screens;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
+import net.minecraft.util.HttpUtil;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -39,6 +42,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.lwjgl.glfw.GLFW;
@@ -136,11 +140,60 @@ public final class ZenClientMod implements ClientModInitializer {
           .bounds(6, 6, 150, 20)
           .build()
       );
+      Screens.getButtons(screen).add(
+        Button.builder(Component.literal("Host Zen LAN"), button -> hostZenLan(client))
+          .bounds(6, 30, 150, 20)
+          .build()
+      );
     });
 
     ClientTickEvents.END_CLIENT_TICK.register(this::onEndTick);
     ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> resetSession());
     HudRenderCallback.EVENT.register((drawContext, tickCounter) -> renderHud(Minecraft.getInstance(), drawContext));
+  }
+
+  private void hostZenLan(Minecraft client) {
+    if (client == null || !client.hasSingleplayerServer()) {
+      showZenToast(client, "Zen LAN", "Open a singleplayer world first.");
+      return;
+    }
+
+    IntegratedServer server = client.getSingleplayerServer();
+    if (server == null) {
+      showZenToast(client, "Zen LAN", "Singleplayer server is not ready yet.");
+      return;
+    }
+
+    if (server.isPublished()) {
+      showZenToast(client, "Zen LAN already open", "Port " + server.getPort());
+      sendPlayerMessage(client, "Zen LAN is already open on port " + server.getPort() + ".");
+      return;
+    }
+
+    int port = HttpUtil.getAvailablePort();
+    boolean published = server.publishServer(GameType.SURVIVAL, false, port);
+    if (published) {
+      showZenToast(client, "Zen LAN is open", "Port " + server.getPort());
+      sendPlayerMessage(client, "Zen LAN hosted from this PC. Friends on your Wi-Fi can join using your launcher Friends address and port " + server.getPort() + ".");
+    } else {
+      showZenToast(client, "Zen LAN failed", "Could not open a local port.");
+      sendPlayerMessage(client, "Zen LAN could not open. Check firewall permissions and try again.");
+    }
+  }
+
+  private void showZenToast(Minecraft client, String title, String message) {
+    if (client == null) return;
+    SystemToast.addOrUpdate(
+      client.getToastManager(),
+      SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
+      Component.literal(title),
+      Component.literal(message)
+    );
+  }
+
+  private void sendPlayerMessage(Minecraft client, String message) {
+    if (client == null || client.player == null) return;
+    client.player.displayClientMessage(Component.literal(message), false);
   }
 
   private void onEndTick(Minecraft client) {
