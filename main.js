@@ -984,19 +984,33 @@ function versionMatchesSimpleRange(version, rangeText) {
 function isZenClientModSupportedMinecraftVersion(minecraftVersion) {
   const value = String(minecraftVersion || "").trim();
   if (!value) return false;
-  if (isModernMinecraftRelease(value)) return compareMcVersions(value, "1.21") >= 0;
+  if (isModernMinecraftRelease(value)) return value.startsWith("1.") && compareMcVersions(value, "1.21") >= 0;
 
   const namedSnapshot = value.match(/^(\d+\.\d+(?:\.\d+)?)-(snapshot|pre|rc)-?\d+$/i);
   if (namedSnapshot) {
     const baseVersion = namedSnapshot[1];
     if (baseVersion.startsWith("1.")) return compareMcVersions(baseVersion, "1.21") >= 0;
-    return Number.parseInt(baseVersion.split(".")[0], 10) >= 25;
+    return false;
   }
 
-  const weekSnapshot = value.toLowerCase().match(/^(\d{2})w\d{2}[a-z]$/);
-  if (weekSnapshot) return Number.parseInt(weekSnapshot[1], 10) >= 25;
-
   return false;
+}
+
+function removeBundledZenClientMods(minecraftRoot, reason, keepName = "") {
+  const modsDir = path.join(minecraftRoot, "mods");
+  if (!fs.existsSync(modsDir)) return;
+
+  for (const staleName of ["zen-client-fabric.jar", "zen-client-quilt.jar", "zen-client-forge.jar", "zen-client-neoforge.jar"]) {
+    if (staleName === keepName) continue;
+    const stalePath = path.join(modsDir, staleName);
+    if (!fs.existsSync(stalePath)) continue;
+    try {
+      fs.unlinkSync(stalePath);
+      appendLog(`[zen-mod] Removed ${staleName}${reason ? ` (${reason})` : ""}.`);
+    } catch (error) {
+      appendLog(`[zen-mod] Could not remove ${staleName}: ${error?.message || String(error)}`);
+    }
+  }
 }
 
 function getBundledZenBundleSpec(launchType, minecraftVersion) {
@@ -2222,6 +2236,7 @@ async function ensureZenClientMod(minecraftRoot, launchType, minecraftVersion) {
 
   const bundleSpec = getBundledZenBundleSpec(selected, minecraftVersion);
   if (!bundleSpec) {
+    removeBundledZenClientMods(minecraftRoot, `not compatible with ${minecraftVersion}`);
     appendLog(`[zen-mod] No Zen Client in-game bundle is available for ${selected} ${minecraftVersion}. Skipping in-game Zen features for this combination.`);
     return;
   }
@@ -2237,17 +2252,7 @@ async function ensureZenClientMod(minecraftRoot, launchType, minecraftVersion) {
   const targetName = String(bundleSpec.targetName || `zen-client-${selected}.jar`).trim() || `zen-client-${selected}.jar`;
   const target = path.join(modsDir, targetName);
 
-  for (const staleName of ["zen-client-fabric.jar", "zen-client-quilt.jar", "zen-client-forge.jar", "zen-client-neoforge.jar"]) {
-    if (staleName === targetName) continue;
-    const stalePath = path.join(modsDir, staleName);
-    if (fs.existsSync(stalePath)) {
-      try {
-        fs.unlinkSync(stalePath);
-      } catch {
-        // ignore cleanup failures
-      }
-    }
-  }
+  removeBundledZenClientMods(minecraftRoot, `replaced by ${targetName}`, targetName);
 
   const sourceStat = fs.statSync(source);
   const targetStat = fs.existsSync(target) ? fs.statSync(target) : null;
