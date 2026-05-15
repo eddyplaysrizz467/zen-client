@@ -1321,10 +1321,27 @@ async function fetchVersions() {
     parseMetadataVersions(neoforgeMetadata).map((item) => neoforgeLoaderToMinecraftVersion(item)).filter((item) => item.startsWith("1."))
   ).reverse();
 
+  const vanillaVersions = manifest.versions
+    .filter((item) => item && item.id && item.type !== "old_alpha" && item.type !== "old_beta")
+    .slice(0, 160)
+    .map((item) => item.id);
+
+  const fabricVersions = uniqueList(
+    fabricGames
+      .map((item) => String(item?.version || "").trim())
+      .filter((item) => item.startsWith("1."))
+  ).slice(0, 160);
+
+  const quiltVersions = uniqueList(
+    quiltGames
+      .map((item) => String(item?.version || "").trim())
+      .filter((item) => item.startsWith("1."))
+  ).slice(0, 160);
+
   return {
-    vanilla: manifest.versions.filter((item) => item.type === "release").slice(0, 80).map((item) => item.id),
-    fabric: fabricGames.filter((item) => item.stable).slice(0, 80).map((item) => item.version).filter((item) => item.startsWith("1.")),
-    quilt: quiltGames.filter((item) => item.stable).slice(0, 80).map((item) => item.version).filter((item) => item.startsWith("1.")),
+    vanilla: vanillaVersions,
+    fabric: fabricVersions,
+    quilt: quiltVersions,
     forge: forgeVersions.slice(0, 80),
     neoforge: neoforgeVersions.slice(0, 80)
   };

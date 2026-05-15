@@ -62,7 +62,7 @@ const offlineUsername = document.getElementById("offlineUsername");
 const offlineUuid = document.getElementById("offlineUuid");
 
 let state = null;
-let versions = { vanilla: [], fabric: [], quilt: [] };
+let versions = { vanilla: [], fabric: [], quilt: [], forge: [], neoforge: [] };
 let busy = false;
 // Panda + bubble visuals were removed per request.
 let libraryBusy = false;
