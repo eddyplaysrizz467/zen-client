@@ -68,6 +68,7 @@ const serverPluginResults = document.getElementById("serverPluginResults");
 const serverPluginInstalledList = document.getElementById("serverPluginInstalledList");
 const managedServerStatus = document.getElementById("managedServerStatus");
 const openServerPluginsFolderButton = document.getElementById("openServerPluginsFolderButton");
+const openManagedServerFirewallButton = document.getElementById("openManagedServerFirewallButton");
 const startManagedServerButton = document.getElementById("startManagedServerButton");
 const restartManagedServerButton = document.getElementById("restartManagedServerButton");
 const stopManagedServerButton = document.getElementById("stopManagedServerButton");
@@ -124,6 +125,7 @@ function setBusy(nextBusy) {
     authorizeServerPluginsButton,
     refreshServerPluginsButton,
     openServerPluginsFolderButton,
+    openManagedServerFirewallButton,
     startManagedServerButton,
     restartManagedServerButton,
     stopManagedServerButton
@@ -452,16 +454,21 @@ function renderManagedServerStatus() {
   if (running) {
     const idle = Number(managed.idleSeconds || 0);
     const players = Number(managed.playerCount || 0);
-    managedServerStatus.textContent = `Running ${managed.address} on Paper ${managed.version}. Players: ${players}. Empty for ${Math.floor(idle / 60)}m ${idle % 60}s.`;
+    const port = managed.port || (managed.address || "").split(":")[1] || "25565";
+    const localAddress = managed.localAddress || "this PC";
+    managedServerStatus.textContent = `Running ${managed.address} on Paper ${managed.version}. Players: ${players}. Empty for ${Math.floor(idle / 60)}m ${idle % 60}s. Router forward target: TCP ${port} -> ${localAddress}:${port}.`;
   } else if (managed.state === "stopping") {
     managedServerStatus.textContent = "Server is stopping...";
   } else if (profile?.authorized) {
-    managedServerStatus.textContent = `Ready. Plugins folder: ${profile.pluginsDir}`;
+    const port = (profile.address || "").includes(":") ? (profile.address || "").split(":").pop() : "25565";
+    const localAddress = managed.localAddress || serverPluginState.managedServer?.localAddress || "this PC";
+    managedServerStatus.textContent = `Ready. Plugins folder: ${profile.pluginsDir}. If friends time out, forward TCP ${port} to ${localAddress}:${port}.`;
   } else {
     managedServerStatus.textContent = "Authorize a server, then start it here to load plugins.";
   }
 
   if (openServerPluginsFolderButton) openServerPluginsFolderButton.disabled = busy || !profile?.authorized;
+  if (openManagedServerFirewallButton) openManagedServerFirewallButton.disabled = busy || !profile?.authorized;
   if (startManagedServerButton) startManagedServerButton.disabled = busy || !profile?.authorized || (running && isCurrent);
   if (restartManagedServerButton) restartManagedServerButton.disabled = busy || !profile?.authorized;
   if (stopManagedServerButton) stopManagedServerButton.disabled = busy || !running;
@@ -894,6 +901,20 @@ openServerPluginsFolderButton.addEventListener("click", async () => {
     statusText.textContent = `Opened plugins folder: ${result.path}`;
   } catch (error) {
     statusText.textContent = `Problem: ${error.message}`;
+  }
+});
+
+openManagedServerFirewallButton.addEventListener("click", async () => {
+  setBusy(true);
+  try {
+    const result = await window.aeroApi.openManagedServerFirewall({ address: serverPluginAddress.value });
+    serverPluginState = await window.aeroApi.getServerPluginsState();
+    renderServerPluginAuth();
+    statusText.textContent = `Approve the Windows prompt. Then forward TCP ${result.port} to ${result.localAddress}:${result.port} in your router.`;
+  } catch (error) {
+    statusText.textContent = `Problem: ${error.message}`;
+  } finally {
+    setBusy(false);
   }
 });
 

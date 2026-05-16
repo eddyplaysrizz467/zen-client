@@ -281,10 +281,11 @@ public final class ZenClientMod implements ClientModInitializer {
 
   private void sendLanInviteMessages(Minecraft client, int port) {
     lastSessionPublicInvite = "";
-    String localInvite = buildInviteAddress(bestLocalIp(), port);
+    String localIp = bestLocalIp();
+    String localInvite = buildInviteAddress(localIp, port);
     String ownerCode = ownerCodeForInvite(localInvite);
     sendPlayerMessage(client, "Zen LAN is open. Looking up your real public address...");
-    sendPlayerMessage(client, "If outside friends get getsockopt/refused, your router or Windows Firewall is blocking this port.");
+    sendPlayerMessage(client, "If outside friends time out or get getsockopt/refused, your router or Windows Firewall is blocking this port.");
 
     Thread publicIpThread = new Thread(() -> {
       String publicIp = fetchPublicIp();
@@ -302,11 +303,13 @@ public final class ZenClientMod implements ClientModInitializer {
           sendPlayerMessage(client, Component.literal("Server plugin folder: ")
             .append(copyableText(pluginsDir, "Click to copy plugin folder path")));
         }
+        sendPlayerMessage(client, Component.literal("Router forward target: ")
+          .append(copyableText(localInvite, "Click to copy local router target")));
         sendPlayerMessage(client, Component.literal("Zen plugin owner code: ")
           .append(copyableText(ownerCode, "Click to copy server plugin code")));
         sendPlayerMessage(client, "To load plugins, authorize this server in Zen Client, install plugins, then press Start managed server.");
         sendPlayerMessage(client, "When the managed server is running, type /restart to restart it with the same plugins.");
-        sendPlayerMessage(client, "This public address only works from outside your Wi-Fi if port " + port + " is forwarded to this PC and Java/Minecraft is allowed through Windows Firewall.");
+        sendPlayerMessage(client, "This public address only works from outside your Wi-Fi if TCP port " + port + " is forwarded to the router target above and Java/Minecraft is allowed through Windows Firewall.");
         CONFIG.saveFriendServer("My public hosted world", publicInvite);
       });
     }, "Zen LAN public IP lookup");

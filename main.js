@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, nativeImage, Menu, shell, screen: electronScreen } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
 const { Client, Authenticator } = require("minecraft-launcher-core");
@@ -1408,7 +1409,14 @@ function sanitizeServerPluginRecord(server) {
 }
 
 function getManagedServerStatus() {
-  if (!managedServer) return { running: false, state: "stopped", message: "Server is stopped." };
+  if (!managedServer) {
+    return {
+      running: false,
+      state: "stopped",
+      localAddress: bestLocalIpv4(),
+      message: "Server is stopped."
+    };
+  }
   return {
     running: Boolean(managedServer.process && !managedServer.stopping),
     state: managedServer.stopping ? "stopping" : "running",
@@ -1417,10 +1425,23 @@ function getManagedServerStatus() {
     version: managedServer.version,
     rootDir: managedServer.rootDir,
     pluginsDir: managedServer.pluginsDir,
+    localAddress: bestLocalIpv4(),
     playerCount: managedServer.playerCount,
     idleSeconds: managedServer.idleSince ? Math.max(0, Math.floor((Date.now() - managedServer.idleSince) / 1000)) : 0,
     message: managedServer.stopping ? "Server is stopping..." : `Running on ${managedServer.address}`
   };
+}
+
+function bestLocalIpv4() {
+  const interfaces = os.networkInterfaces();
+  for (const entries of Object.values(interfaces)) {
+    for (const entry of entries || []) {
+      if (entry.family === "IPv4" && !entry.internal && !entry.address.startsWith("169.254.")) {
+        return entry.address;
+      }
+    }
+  }
+  return "127.0.0.1";
 }
 
 function getServerPluginsState() {
@@ -1848,6 +1869,47 @@ async function restartManagedServer(address) {
     return getManagedServerStatus();
   }
   return startManagedServer(target);
+}
+
+async function openManagedServerFirewall(address) {
+  const profile = requireAuthorizedServer(address || managedServer?.address);
+  const version = managedServer?.version || managedServerVersion();
+  const port = parseServerPort(profile.address);
+  const state = loadState();
+  const javaPath = await findJavaExecutable(state.settings?.javaPath, state.settings?.minecraftDirectory || DEFAULT_ROOT, version);
+  const scriptPath = path.join(APP_DIR, "open-managed-server-firewall.ps1");
+  const ruleName = `Zen Client Managed Server ${port}`;
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$port = ${port}`,
+    `$javaPath = ${JSON.stringify(javaPath)}`,
+    `$ruleName = ${JSON.stringify(ruleName)}`,
+    "netsh advfirewall firewall delete rule name=\"$ruleName\" | Out-Null",
+    "netsh advfirewall firewall add rule name=\"$ruleName\" dir=in action=allow protocol=TCP localport=$port profile=any | Out-Null",
+    "if (Test-Path -LiteralPath $javaPath) {",
+    "  netsh advfirewall firewall add rule name=\"$ruleName Java\" dir=in action=allow program=\"$javaPath\" profile=any | Out-Null",
+    "}",
+    "Write-Host \"Zen Client firewall rules added for TCP port $port.\""
+  ].join("\r\n");
+  fs.writeFileSync(scriptPath, script, "utf8");
+
+  const quotedScriptPath = `'${scriptPath.replace(/'/g, "''")}'`;
+  const command = `Start-Process -FilePath powershell -Verb RunAs -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',${quotedScriptPath})`;
+  const result = spawnSync("powershell", [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    command
+  ], { encoding: "utf8" });
+  if (result.status !== 0) throw new Error(result.stderr || result.stdout || "Could not open the Windows Firewall prompt.");
+
+  appendLog(`[server] Requested Windows Firewall rules for TCP port ${port}.`);
+  return {
+    port,
+    localAddress: bestLocalIpv4(),
+    message: `Approve the Windows prompt, then forward TCP port ${port} to ${bestLocalIpv4()} in your router.`
+  };
 }
 
 function openServerPluginFolder(address) {
@@ -3188,6 +3250,7 @@ ipcMain.handle("serverPlugins:authorize", async (_event, payload) => authorizeSe
 ipcMain.handle("serverPlugins:search", async (_event, payload) => searchServerPlugins(payload?.query));
 ipcMain.handle("serverPlugins:install", async (_event, payload) => installServerPlugin(payload));
 ipcMain.handle("serverPlugins:openFolder", async (_event, payload) => openServerPluginFolder(payload?.address));
+ipcMain.handle("serverPlugins:openFirewall", async (_event, payload) => openManagedServerFirewall(payload?.address));
 ipcMain.handle("serverPlugins:startManaged", async (_event, payload) => startManagedServer(payload?.address));
 ipcMain.handle("serverPlugins:stopManaged", async () => stopManagedServer("manual"));
 ipcMain.handle("serverPlugins:restartManaged", async (_event, payload) => restartManagedServer(payload?.address));

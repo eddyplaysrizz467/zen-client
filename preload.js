@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld("aeroApi", {
   searchServerPlugins: (payload) => invoke("serverPlugins:search", payload),
   installServerPlugin: (payload) => invoke("serverPlugins:install", payload),
   openServerPluginFolder: (payload) => invoke("serverPlugins:openFolder", payload),
+  openManagedServerFirewall: (payload) => invoke("serverPlugins:openFirewall", payload),
   startManagedServer: (payload) => invoke("serverPlugins:startManaged", payload),
   stopManagedServer: () => invoke("serverPlugins:stopManaged"),
   restartManagedServer: (payload) => invoke("serverPlugins:restartManaged", payload),
