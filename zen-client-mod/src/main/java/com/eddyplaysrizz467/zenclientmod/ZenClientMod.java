@@ -2,6 +2,7 @@ package com.eddyplaysrizz467.zenclientmod;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.Inet4Address;
@@ -34,7 +35,11 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.toasts.SystemToast;
+import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.PauseScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.ChatFormatting;
@@ -78,6 +83,7 @@ public final class ZenClientMod implements ClientModInitializer {
   private static final int HUD_BOX_HEIGHT = 18;
   private static final int HUD_BOX_GAP = 4;
   private static final String OWNER_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  private static final String ZEN_INVITE_PREFIX = "ZEN-";
   private static final SecureRandom OWNER_CODE_RANDOM = new SecureRandom();
 
   private static ZenClientMod INSTANCE;
@@ -215,9 +221,26 @@ public final class ZenClientMod implements ClientModInitializer {
     return buildInviteAddress(bestLocalIp(), server.getPort());
   }
 
+  public static String currentZenInviteCode(Minecraft client) {
+    String address = currentLanInvite(client);
+    return address.isBlank() ? "" : encodeZenInvite(address);
+  }
+
   public static void copyToClipboard(Minecraft client, String text) {
     if (client == null || text == null || text.isBlank()) return;
     client.keyboardHandler.setClipboard(text);
+  }
+
+  public static void joinZenInvite(Minecraft client, Screen parent, String inviteOrAddress) {
+    if (client == null) return;
+    String address = resolveZenInvite(inviteOrAddress);
+    if (address.isBlank() || !ServerAddress.isValidAddress(address)) {
+      showStaticToast(client, "Zen Invite", "Paste a Zen invite code or server address.");
+      return;
+    }
+
+    ServerData serverData = new ServerData(inviteOrAddress.trim().startsWith(ZEN_INVITE_PREFIX) ? "Zen Invite" : "Zen Server", address, ServerData.Type.OTHER);
+    ConnectScreen.startConnecting(parent, client, ServerAddress.parseString(address), serverData, false, null);
   }
 
   static String buildInviteAddress(String host, int port) {
@@ -243,22 +266,28 @@ public final class ZenClientMod implements ClientModInitializer {
 
   private void sendLanInviteMessages(Minecraft client, int port) {
     String localInvite = buildInviteAddress(bestLocalIp(), port);
+    String zenInvite = encodeZenInvite(localInvite);
     String ownerCode = ownerCodeForInvite(localInvite);
-    sendPlayerMessage(client, Component.literal("Zen LAN is open. Same-Wi-Fi invite: ")
-      .append(copyableText(localInvite, "Click to copy invite")));
+    sendPlayerMessage(client, Component.literal("Zen LAN is open. Zen invite code: ")
+      .append(copyableText(zenInvite, "Click to copy Zen invite")));
+    sendPlayerMessage(client, Component.literal("Normal Minecraft address: ")
+      .append(copyableText(localInvite, "Click to copy real address")));
     sendPlayerMessage(client, Component.literal("Zen plugin owner code: ")
       .append(copyableText(ownerCode, "Click to copy server plugin code")));
-    sendPlayerMessage(client, "Click the invite/code to copy it. Put the code in Zen Client's Server Plugins tab to unlock installs for this server.");
-    sendPlayerMessage(client, "Friends outside your Wi-Fi need router port forwarding for this port.");
-    CONFIG.saveFriendServer("My hosted world", localInvite);
+    sendPlayerMessage(client, "Zen users can use the Zen invite code. Normal Minecraft users still need the real address.");
+    sendPlayerMessage(client, "Friends outside your Wi-Fi still need router port forwarding or a tunnel for this port.");
+    CONFIG.saveFriendServer("My hosted world", zenInvite);
 
     Thread publicIpThread = new Thread(() -> {
       String publicInvite = buildInviteAddress(fetchPublicIp(), port);
       if (publicInvite.isBlank() || publicInvite.equals(localInvite)) return;
       client.execute(() -> {
+        String publicZenInvite = encodeZenInvite(publicInvite);
         sendPlayerMessage(client, Component.literal("Zen public invite if your router forwards the port: ")
-          .append(copyableText(publicInvite, "Click to copy public invite")));
-        CONFIG.saveFriendServer("My public invite", publicInvite);
+          .append(copyableText(publicZenInvite, "Click to copy public Zen invite")));
+        sendPlayerMessage(client, Component.literal("Normal public address: ")
+          .append(copyableText(publicInvite, "Click to copy public address")));
+        CONFIG.saveFriendServer("My public invite", publicZenInvite);
       });
     }, "Zen LAN public IP lookup");
     publicIpThread.setDaemon(true);
@@ -281,6 +310,56 @@ public final class ZenClientMod implements ClientModInitializer {
       .withUnderlined(true)
       .withClickEvent(new ClickEvent.CopyToClipboard(text))
       .withHoverEvent(new HoverEvent.ShowText(Component.literal(hoverText))));
+  }
+
+  public static String encodeZenInvite(String address) {
+    String cleanAddress = address == null ? "" : address.trim();
+    if (cleanAddress.isBlank()) return "";
+
+    byte[] bytes = cleanAddress.getBytes(StandardCharsets.UTF_8);
+    StringBuilder builder = new StringBuilder(ZEN_INVITE_PREFIX);
+    int buffer = 0;
+    int bits = 0;
+    int group = 0;
+    for (byte value : bytes) {
+      buffer = (buffer << 8) | (value & 0xFF);
+      bits += 8;
+      while (bits >= 5) {
+        builder.append(OWNER_CODE_ALPHABET.charAt((buffer >> (bits - 5)) & 31));
+        bits -= 5;
+        group += 1;
+        if (group % 5 == 0) builder.append('-');
+      }
+    }
+    if (bits > 0) {
+      builder.append(OWNER_CODE_ALPHABET.charAt((buffer << (5 - bits)) & 31));
+    }
+    int length = builder.length();
+    if (length > ZEN_INVITE_PREFIX.length() && builder.charAt(length - 1) == '-') {
+      builder.deleteCharAt(length - 1);
+    }
+    return builder.toString();
+  }
+
+  public static String resolveZenInvite(String inviteOrAddress) {
+    String clean = inviteOrAddress == null ? "" : inviteOrAddress.trim();
+    if (!clean.toUpperCase(Locale.ROOT).startsWith(ZEN_INVITE_PREFIX)) return clean;
+
+    String token = clean.substring(ZEN_INVITE_PREFIX.length()).replace("-", "").replace(" ", "").toUpperCase(Locale.ROOT);
+    ByteArrayOutputStream output = new ByteArrayOutputStream();
+    int buffer = 0;
+    int bits = 0;
+    for (int i = 0; i < token.length(); i += 1) {
+      int value = OWNER_CODE_ALPHABET.indexOf(token.charAt(i));
+      if (value < 0) return "";
+      buffer = (buffer << 5) | value;
+      bits += 5;
+      if (bits >= 8) {
+        output.write((buffer >> (bits - 8)) & 0xFF);
+        bits -= 8;
+      }
+    }
+    return new String(output.toByteArray(), StandardCharsets.UTF_8).trim();
   }
 
   private static String ownerCodeForInvite(String invite) {
@@ -314,6 +393,7 @@ public final class ZenClientMod implements ClientModInitializer {
         + "  \"servers\": [\n"
         + "    {\n"
         + "      \"address\": \"" + escapeJson(address) + "\",\n"
+        + "      \"inviteCode\": \"" + escapeJson(encodeZenInvite(address)) + "\",\n"
         + "      \"ownerCodeHash\": \"" + sha256Hex(code) + "\",\n"
         + "      \"pluginsDir\": \"" + escapeJson(pluginsDir) + "\",\n"
         + "      \"createdAt\": \"" + escapeJson(Instant.now().toString()) + "\"\n"
@@ -359,6 +439,11 @@ public final class ZenClientMod implements ClientModInitializer {
   }
 
   private void showZenToast(Minecraft client, String title, String message) {
+    if (client == null) return;
+    showStaticToast(client, title, message);
+  }
+
+  private static void showStaticToast(Minecraft client, String title, String message) {
     if (client == null) return;
     SystemToast.addOrUpdate(
       client.getToastManager(),

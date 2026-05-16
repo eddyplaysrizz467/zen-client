@@ -6,8 +6,8 @@ import java.util.Map;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.network.chat.Component;
 
 public final class ZenFriendsScreen extends Screen {
@@ -15,11 +15,13 @@ public final class ZenFriendsScreen extends Screen {
   private static final int ROW_HEIGHT = 32;
   private static final int SCROLL_STEP = 24;
   private static final int TOP_PADDING = 74;
+  private static final int ENTRY_TOP = TOP_PADDING + 62;
   private static final int BOTTOM_PADDING = 48;
 
   private final Screen parent;
   private final List<Entry> entries = new ArrayList<>();
   private int scrollOffset = 0;
+  private EditBox inviteBox;
 
   private static final class Entry {
     private final String name;
@@ -48,7 +50,7 @@ public final class ZenFriendsScreen extends Screen {
 
   private void rebuildEntries() {
     entries.clear();
-    int y = TOP_PADDING + 56;
+    int y = ENTRY_TOP;
     for (Map.Entry<String, String> friend : ZenClientMod.config().orderedFriendServers()) {
       entries.add(new Entry(friend.getKey(), friend.getValue(), y));
       y += ROW_HEIGHT + 8;
@@ -56,36 +58,53 @@ public final class ZenFriendsScreen extends Screen {
   }
 
   private void rebuildFriendWidgets() {
+    String typedInvite = inviteBox == null ? "" : inviteBox.getValue();
     clearWidgets();
     int panelLeft = (this.width - PANEL_WIDTH) / 2;
     int panelRight = panelLeft + PANEL_WIDTH;
-    int visibleTop = TOP_PADDING + 44;
+    int visibleTop = ENTRY_TOP - 4;
     int visibleBottom = this.height - BOTTOM_PADDING - 8;
 
-    String invite = ZenClientMod.currentLanInvite(this.minecraft);
+    String invite = ZenClientMod.currentZenInviteCode(this.minecraft);
+    String realAddress = ZenClientMod.currentLanInvite(this.minecraft);
     boolean hasInvite = !invite.isBlank();
 
     addRenderableWidget(Button.builder(
-        Component.literal(hasInvite ? "Copy Current Invite" : "No Hosted World"),
-        button -> ZenClientMod.copyToClipboard(this.minecraft, ZenClientMod.currentLanInvite(this.minecraft)))
-      .bounds(panelLeft + 18, TOP_PADDING, 150, 20)
+        Component.literal(hasInvite ? "Copy Zen Code" : "No Hosted World"),
+        button -> ZenClientMod.copyToClipboard(this.minecraft, ZenClientMod.currentZenInviteCode(this.minecraft)))
+      .bounds(panelLeft + 18, TOP_PADDING, 112, 20)
       .build()).active = hasInvite;
 
     addRenderableWidget(Button.builder(
-        Component.literal("Save Current Host"),
+        Component.literal("Copy Real IP"),
+        button -> ZenClientMod.copyToClipboard(this.minecraft, ZenClientMod.currentLanInvite(this.minecraft)))
+      .bounds(panelLeft + 136, TOP_PADDING, 96, 20)
+      .build()).active = hasInvite && !realAddress.isBlank();
+
+    addRenderableWidget(Button.builder(
+        Component.literal("Save Host"),
         button -> {
-          String currentInvite = ZenClientMod.currentLanInvite(this.minecraft);
+          String currentInvite = ZenClientMod.currentZenInviteCode(this.minecraft);
           if (!currentInvite.isBlank()) {
             ZenClientMod.config().saveFriendServer("My hosted world", currentInvite);
             rebuildEntries();
             rebuildFriendWidgets();
           }
         })
-      .bounds(panelLeft + 176, TOP_PADDING, 132, 20)
+      .bounds(panelLeft + 238, TOP_PADDING, 86, 20)
       .build()).active = hasInvite;
 
     addRenderableWidget(Button.builder(Component.literal("Back"), button -> this.minecraft.setScreen(parent))
       .bounds(panelRight - 88, TOP_PADDING, 70, 20)
+      .build());
+
+    inviteBox = new EditBox(this.font, panelLeft + 18, TOP_PADDING + 28, PANEL_WIDTH - 116, 20, Component.literal("Zen invite"));
+    inviteBox.setHint(Component.literal("Paste Zen invite code or address"));
+    inviteBox.setValue(typedInvite);
+    addRenderableWidget(inviteBox);
+
+    addRenderableWidget(Button.builder(Component.literal("Join"), button -> ZenClientMod.joinZenInvite(this.minecraft, this, inviteBox.getValue()))
+      .bounds(panelRight - 88, TOP_PADDING + 28, 70, 20)
       .build());
 
     for (Entry entry : entries) {
@@ -94,8 +113,11 @@ public final class ZenFriendsScreen extends Screen {
           ZenClientMod.copyToClipboard(this.minecraft, entry.address);
           button.setMessage(Component.literal("Copied"));
         })
-        .bounds(panelRight - 142, y + 6, 58, 20)
+        .bounds(panelRight - 196, y + 6, 52, 20)
         .build());
+      addRenderableWidget(Button.builder(Component.literal("Join"), button -> ZenClientMod.joinZenInvite(this.minecraft, this, entry.address))
+        .bounds(panelRight - 138, y + 6, 54, 20)
+        .build()).visible = y + ROW_HEIGHT >= visibleTop && y <= visibleBottom;
       entry.removeButton = addRenderableWidget(Button.builder(Component.literal("Remove"), button -> {
           ZenClientMod.config().removeFriendServer(entry.name);
           rebuildEntries();
@@ -123,8 +145,8 @@ public final class ZenFriendsScreen extends Screen {
     context.fill(panelLeft, panelTop, panelRight, panelTop + 38, 0xF0122118);
     context.drawCenteredString(this.font, this.title, this.width / 2, panelTop + 12, 0xFFFFFFFF);
 
-    String invite = ZenClientMod.currentLanInvite(this.minecraft);
-    String inviteText = invite.isBlank() ? "Open a singleplayer world and press Host Zen LAN first." : "Current invite: " + invite;
+    String invite = ZenClientMod.currentZenInviteCode(this.minecraft);
+    String inviteText = invite.isBlank() ? "Open a singleplayer world and press Host Zen LAN first." : "Current Zen invite: " + invite;
     context.drawString(this.font, inviteText, panelLeft + 18, 54, invite.isBlank() ? 0xFFB7B7B7 : 0xFFBFFFD2, false);
 
     if (entries.isEmpty()) {
@@ -132,7 +154,7 @@ public final class ZenFriendsScreen extends Screen {
     } else {
       for (Entry entry : entries) {
         int y = entry.baseY - scrollOffset;
-        int visibleTop = TOP_PADDING + 44;
+        int visibleTop = ENTRY_TOP - 4;
         int visibleBottom = this.height - BOTTOM_PADDING - 8;
         if (y + ROW_HEIGHT < visibleTop || y > visibleBottom) continue;
         context.fill(panelLeft + 18, y, panelRight - 18, y + ROW_HEIGHT, 0x5523382C);
@@ -144,7 +166,7 @@ public final class ZenFriendsScreen extends Screen {
     super.render(context, mouseX, mouseY, delta);
 
     if (maxScroll() > 0) {
-      int trackTop = TOP_PADDING + 44;
+      int trackTop = ENTRY_TOP - 4;
       int trackBottom = this.height - BOTTOM_PADDING - 8;
       int trackX = panelRight - 10;
       context.fill(trackX, trackTop, trackX + 4, trackBottom, 0x55303036);
@@ -171,13 +193,13 @@ public final class ZenFriendsScreen extends Screen {
 
   private int maxScroll() {
     int contentHeight = entries.size() * (ROW_HEIGHT + 8);
-    int visibleHeight = (this.height - BOTTOM_PADDING - 8) - (TOP_PADDING + 44);
+    int visibleHeight = (this.height - BOTTOM_PADDING - 8) - (ENTRY_TOP - 4);
     return Math.max(0, contentHeight - visibleHeight + 12);
   }
 
   private double visibleFraction() {
     int contentHeight = entries.size() * (ROW_HEIGHT + 8);
-    int visibleHeight = (this.height - BOTTOM_PADDING - 8) - (TOP_PADDING + 44);
+    int visibleHeight = (this.height - BOTTOM_PADDING - 8) - (ENTRY_TOP - 4);
     if (contentHeight <= 0) return 1.0D;
     return Math.min(1.0D, Math.max(0.15D, visibleHeight / (double) contentHeight));
   }

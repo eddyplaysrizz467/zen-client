@@ -27,6 +27,8 @@ const ZEN_CLIENT_BUNDLE_MANIFEST_FILENAME = "zen-client-bundles.json";
 const ZEN_CLIENT_MOD_FILENAME = "zen-client-fabric.jar";
 const ZEN_CLIENT_MOD_FILENAME_TEMPLATE = "zen-client-fabric-%VERSION%.jar";
 const AUTH_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
+const ZEN_INVITE_PREFIX = "ZEN-";
+const ZEN_INVITE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const ZEN_CLIENT_REQUIRED_MOD_LABELS = {
   "fabric-api": "Fabric API"
 };
@@ -1301,11 +1303,37 @@ function selectAccount(accountId) {
 }
 
 function normalizeServerAddress(address) {
-  return String(address || "")
+  let normalized = String(address || "")
     .trim()
-    .toLowerCase()
     .replace(/^https?:\/\//, "")
     .replace(/\/.*$/, "");
+  const decoded = decodeZenInviteAddress(normalized);
+  if (decoded) normalized = decoded;
+  return normalized.toLowerCase();
+}
+
+function decodeZenInviteAddress(address) {
+  const clean = String(address || "").trim().toUpperCase();
+  if (!clean.startsWith(ZEN_INVITE_PREFIX)) return "";
+  const token = clean.slice(ZEN_INVITE_PREFIX.length).replace(/[-\s]/g, "");
+  if (!token) return "";
+
+  const bytes = [];
+  let buffer = 0;
+  let bits = 0;
+  for (const char of token) {
+    const value = ZEN_INVITE_ALPHABET.indexOf(char);
+    if (value < 0) return "";
+    buffer = (buffer << 5) | value;
+    bits += 5;
+    if (bits >= 8) {
+      bytes.push((buffer >> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+
+  const decoded = Buffer.from(bytes).toString("utf8").trim();
+  return /^[a-z0-9._:-]+$/i.test(decoded) ? decoded : "";
 }
 
 function assertServerAddress(address) {
