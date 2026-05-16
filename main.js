@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, nativeImage, Menu, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, nativeImage, Menu, shell, screen: electronScreen } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
@@ -738,8 +738,45 @@ function formatInvokeError(error) {
   return String(error);
 }
 
+function launcherWindowBounds() {
+  const preferredWidth = 1240;
+  const preferredHeight = 840;
+  const minimumWidth = 760;
+  const minimumHeight = 560;
+
+  try {
+    const point = electronScreen.getCursorScreenPoint();
+    const display = electronScreen.getDisplayNearestPoint(point) || electronScreen.getPrimaryDisplay();
+    const workArea = display?.workArea || display?.bounds;
+    if (!workArea) throw new Error("No display work area");
+
+    const margin = 32;
+    const maxWidth = Math.max(minimumWidth, workArea.width - margin);
+    const maxHeight = Math.max(minimumHeight, workArea.height - margin);
+    const width = Math.min(preferredWidth, maxWidth);
+    const height = Math.min(preferredHeight, maxHeight);
+
+    return {
+      x: Math.round(workArea.x + (workArea.width - width) / 2),
+      y: Math.round(workArea.y + (workArea.height - height) / 2),
+      width,
+      height,
+      minWidth: Math.min(980, width),
+      minHeight: Math.min(700, height)
+    };
+  } catch {
+    return {
+      width: preferredWidth,
+      height: preferredHeight,
+      minWidth: 980,
+      minHeight: 700
+    };
+  }
+}
+
 function createWindow() {
   const icon = nativeImage.createFromDataURL(zenIconDataUrl());
+  const windowBounds = launcherWindowBounds();
 
   // Remove the top menu bar (File/Edit/...) on Windows/Linux.
   try {
@@ -749,10 +786,7 @@ function createWindow() {
   }
 
   mainWindow = new BrowserWindow({
-    width: 1240,
-    height: 840,
-    minWidth: 980,
-    minHeight: 700,
+    ...windowBounds,
     backgroundColor: "#050505",
     title: APP_NAME,
     icon,
