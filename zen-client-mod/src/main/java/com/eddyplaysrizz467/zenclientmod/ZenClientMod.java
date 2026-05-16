@@ -223,8 +223,7 @@ public final class ZenClientMod implements ClientModInitializer {
   }
 
   public static String currentZenInviteCode(Minecraft client) {
-    String address = currentPreferredInvite(client);
-    return address.isBlank() ? "" : encodeZenInvite(address);
+    return currentPreferredInvite(client);
   }
 
   public static String currentPreferredInvite(Minecraft client) {
@@ -243,13 +242,13 @@ public final class ZenClientMod implements ClientModInitializer {
 
   public static void joinZenInvite(Minecraft client, Screen parent, String inviteOrAddress) {
     if (client == null) return;
-    String address = resolveZenInvite(inviteOrAddress);
+    String address = inviteOrAddress == null ? "" : inviteOrAddress.trim();
     if (address.isBlank() || !ServerAddress.isValidAddress(address)) {
-      showStaticToast(client, "Zen Invite", "Paste a Zen invite code or server address.");
+      showStaticToast(client, "Zen Server", "Paste a public server address.");
       return;
     }
 
-    ServerData serverData = new ServerData(inviteOrAddress.trim().startsWith(ZEN_INVITE_PREFIX) ? "Zen Invite" : "Zen Server", address, ServerData.Type.OTHER);
+    ServerData serverData = new ServerData("Zen Server", address, ServerData.Type.OTHER);
     ConnectScreen.startConnecting(parent, client, ServerAddress.parseString(address), serverData, false, null);
   }
 
@@ -277,35 +276,30 @@ public final class ZenClientMod implements ClientModInitializer {
   private void sendLanInviteMessages(Minecraft client, int port) {
     lastSessionPublicInvite = "";
     String localInvite = buildInviteAddress(bestLocalIp(), port);
-    String zenInvite = encodeZenInvite(localInvite);
     String ownerCode = ownerCodeForInvite(localInvite);
-    sendPlayerMessage(client, Component.literal("Zen LAN is open. Same-Wi-Fi Zen invite: ")
-      .append(copyableText(zenInvite, "Click to copy same-Wi-Fi Zen invite")));
-    sendPlayerMessage(client, Component.literal("Same-Wi-Fi Minecraft address: ")
-      .append(copyableText(localInvite, "Click to copy same-Wi-Fi address")));
-    sendPlayerMessage(client, Component.literal("Zen plugin owner code: ")
-      .append(copyableText(ownerCode, "Click to copy server plugin code")));
-    sendPlayerMessage(client, "Looking up your real public IP for friends outside your Wi-Fi...");
+    sendPlayerMessage(client, "Zen LAN is open. Looking up your real public address...");
     sendPlayerMessage(client, "If outside friends get getsockopt/refused, your router or Windows Firewall is blocking this port.");
-    CONFIG.saveFriendServer("My same-Wi-Fi hosted world", zenInvite);
 
     Thread publicIpThread = new Thread(() -> {
       String publicIp = fetchPublicIp();
       String publicInvite = buildInviteAddress(publicIp, port);
       client.execute(() -> {
         if (publicInvite.isBlank() || publicInvite.equals(localInvite)) {
-          sendPlayerMessage(client, "Zen could not find a different real public IP. Use the same-Wi-Fi address locally, or set up port forwarding/tunnel for outside friends.");
+          sendPlayerMessage(client, "Zen could not find your real public address. Set up port forwarding/tunnel, then host again.");
           return;
         }
         lastSessionPublicInvite = publicInvite;
-        String publicZenInvite = encodeZenInvite(publicInvite);
-        writeServerPluginCodeBridge(publicInvite, ownerCode);
-        sendPlayerMessage(client, Component.literal("Real public Zen invite for outside friends: ")
-          .append(copyableText(publicZenInvite, "Click to copy public Zen invite")));
+        String pluginsDir = writeServerPluginCodeBridge(publicInvite, ownerCode);
         sendPlayerMessage(client, Component.literal("Real public Minecraft address: ")
           .append(copyableText(publicInvite, "Click to copy public address")));
+        if (!pluginsDir.isBlank()) {
+          sendPlayerMessage(client, Component.literal("Server plugin folder: ")
+            .append(copyableText(pluginsDir, "Click to copy plugin folder path")));
+        }
+        sendPlayerMessage(client, Component.literal("Zen plugin owner code: ")
+          .append(copyableText(ownerCode, "Click to copy server plugin code")));
         sendPlayerMessage(client, "This public address only works from outside your Wi-Fi if port " + port + " is forwarded to this PC and Java/Minecraft is allowed through Windows Firewall.");
-        CONFIG.saveFriendServer("My public hosted world", publicZenInvite);
+        CONFIG.saveFriendServer("My public hosted world", publicInvite);
       });
     }, "Zen LAN public IP lookup");
     publicIpThread.setDaemon(true);
@@ -398,10 +392,10 @@ public final class ZenClientMod implements ClientModInitializer {
     return builder.toString();
   }
 
-  private static void writeServerPluginCodeBridge(String address, String code) {
+  private static String writeServerPluginCodeBridge(String address, String code) {
     try {
       String appData = System.getenv("APPDATA");
-      if (appData == null || appData.isBlank()) return;
+      if (appData == null || appData.isBlank()) return "";
       Path appDir = Path.of(appData, "ZenClient");
       Files.createDirectories(appDir);
       String profileId = sha256Hex(address).substring(0, 16);
@@ -419,8 +413,10 @@ public final class ZenClientMod implements ClientModInitializer {
         + "  ]\n"
         + "}\n";
       Files.writeString(appDir.resolve("server-plugin-codes.json"), json, StandardCharsets.UTF_8);
+      return pluginsDir;
     } catch (Exception ignored) {
       // The code still appears in chat even if the launcher bridge cannot be written.
+      return "";
     }
   }
 

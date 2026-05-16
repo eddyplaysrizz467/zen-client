@@ -70,15 +70,15 @@ public final class ZenFriendsScreen extends Screen {
     boolean hasInvite = !invite.isBlank();
 
     addRenderableWidget(Button.builder(
-        Component.literal(hasInvite ? "Copy Zen Code" : "No Hosted World"),
+        Component.literal(hasInvite ? "Copy Address" : "No Public Address"),
         button -> ZenClientMod.copyToClipboard(this.minecraft, ZenClientMod.currentZenInviteCode(this.minecraft)))
-      .bounds(panelLeft + 18, TOP_PADDING, 112, 20)
+      .bounds(panelLeft + 18, TOP_PADDING, 116, 20)
       .build()).active = hasInvite;
 
     addRenderableWidget(Button.builder(
         Component.literal("Copy Real IP"),
         button -> ZenClientMod.copyToClipboard(this.minecraft, ZenClientMod.currentPreferredInvite(this.minecraft)))
-      .bounds(panelLeft + 136, TOP_PADDING, 96, 20)
+      .bounds(panelLeft + 140, TOP_PADDING, 96, 20)
       .build()).active = hasInvite && !realAddress.isBlank();
 
     addRenderableWidget(Button.builder(
@@ -99,7 +99,7 @@ public final class ZenFriendsScreen extends Screen {
       .build());
 
     inviteBox = new EditBox(this.font, panelLeft + 18, TOP_PADDING + 28, PANEL_WIDTH - 116, 20, Component.literal("Zen invite"));
-    inviteBox.setHint(Component.literal("Paste Zen invite code or address"));
+    inviteBox.setHint(Component.literal("Paste public server address"));
     inviteBox.setValue(typedInvite);
     addRenderableWidget(inviteBox);
 
@@ -146,11 +146,11 @@ public final class ZenFriendsScreen extends Screen {
     context.drawCenteredString(this.font, this.title, this.width / 2, panelTop + 12, 0xFFFFFFFF);
 
     String invite = ZenClientMod.currentZenInviteCode(this.minecraft);
-    String inviteText = invite.isBlank() ? "Open a singleplayer world and press Host Zen LAN first." : "Current Zen invite: " + invite;
+    String inviteText = invite.isBlank() ? "Open a singleplayer world and press Host Zen LAN first." : "Current public address: " + invite;
     context.drawString(this.font, inviteText, panelLeft + 18, 54, invite.isBlank() ? 0xFFB7B7B7 : 0xFFBFFFD2, false);
 
     if (entries.isEmpty()) {
-      context.drawCenteredString(this.font, Component.literal("Saved friend invites will show here."), this.width / 2, TOP_PADDING + 78, 0xFF909790);
+      context.drawCenteredString(this.font, Component.literal("Saved public server addresses will show here."), this.width / 2, TOP_PADDING + 78, 0xFF909790);
     } else {
       for (Entry entry : entries) {
         int y = entry.baseY - scrollOffset;
