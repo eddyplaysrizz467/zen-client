@@ -359,7 +359,19 @@
               <div id="serverPluginInstalledList" class="friends-list">
                 <div class="empty-state">No server profile selected yet.</div>
               </div>
-              <div class="hint">OP players can use Paper/Spigot's built-in <code>/stop</code>. When Zen manages a future server process, it will say “this server has shutdown” before sending stop.</div>
+              <div class="hint">These plugins load when the managed Paper server below is running.</div>
+            </div>
+
+            <div class="server-plugin-box">
+              <div class="library-title">Managed server</div>
+              <div id="managedServerStatus" class="hint">Authorize a server, then start it here to load plugins.</div>
+              <div class="library-item-actions">
+                <button id="openServerPluginsFolderButton" class="ghost" type="button">Open plugins folder</button>
+                <button id="startManagedServerButton" class="primary" type="button">Start server</button>
+                <button id="restartManagedServerButton" class="ghost" type="button">Restart</button>
+                <button id="stopManagedServerButton" class="ghost" type="button">Stop</button>
+              </div>
+              <div class="hint">Zen stops the server after 10 minutes with no players. In Minecraft, type <code>/restart</code> to restart this managed server with the same folder and plugins.</div>
             </div>
           </div>
         </section>

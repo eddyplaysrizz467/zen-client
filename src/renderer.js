@@ -66,6 +66,11 @@ const refreshServerPluginsButton = document.getElementById("refreshServerPlugins
 const serverPluginSearch = document.getElementById("serverPluginSearch");
 const serverPluginResults = document.getElementById("serverPluginResults");
 const serverPluginInstalledList = document.getElementById("serverPluginInstalledList");
+const managedServerStatus = document.getElementById("managedServerStatus");
+const openServerPluginsFolderButton = document.getElementById("openServerPluginsFolderButton");
+const startManagedServerButton = document.getElementById("startManagedServerButton");
+const restartManagedServerButton = document.getElementById("restartManagedServerButton");
+const stopManagedServerButton = document.getElementById("stopManagedServerButton");
 
 const microsoftButton = document.getElementById("microsoftButton");
 const removeAccountButton = document.getElementById("removeAccountButton");
@@ -117,7 +122,11 @@ function setBusy(nextBusy) {
     refreshPacksButton,
     refreshOptimizationsButton,
     authorizeServerPluginsButton,
-    refreshServerPluginsButton
+    refreshServerPluginsButton,
+    openServerPluginsFolderButton,
+    startManagedServerButton,
+    restartManagedServerButton,
+    stopManagedServerButton
   ].forEach((button) => {
     if (button) button.disabled = nextBusy;
   });
@@ -433,6 +442,31 @@ function renderServerPluginInstalled() {
   });
 }
 
+function renderManagedServerStatus() {
+  if (!managedServerStatus) return;
+  const profile = currentServerPluginProfile();
+  const managed = serverPluginState.managedServer || {};
+  const running = Boolean(managed.running);
+  const isCurrent = profile && String(managed.address || "").toLowerCase() === String(profile.address || "").toLowerCase();
+
+  if (running) {
+    const idle = Number(managed.idleSeconds || 0);
+    const players = Number(managed.playerCount || 0);
+    managedServerStatus.textContent = `Running ${managed.address} on Paper ${managed.version}. Players: ${players}. Empty for ${Math.floor(idle / 60)}m ${idle % 60}s.`;
+  } else if (managed.state === "stopping") {
+    managedServerStatus.textContent = "Server is stopping...";
+  } else if (profile?.authorized) {
+    managedServerStatus.textContent = `Ready. Plugins folder: ${profile.pluginsDir}`;
+  } else {
+    managedServerStatus.textContent = "Authorize a server, then start it here to load plugins.";
+  }
+
+  if (openServerPluginsFolderButton) openServerPluginsFolderButton.disabled = busy || !profile?.authorized;
+  if (startManagedServerButton) startManagedServerButton.disabled = busy || !profile?.authorized || (running && isCurrent);
+  if (restartManagedServerButton) restartManagedServerButton.disabled = busy || !profile?.authorized;
+  if (stopManagedServerButton) stopManagedServerButton.disabled = busy || !running;
+}
+
 function renderServerPluginAuth() {
   const profile = currentServerPluginProfile();
   if (!serverPluginAuthStatus) return;
@@ -446,6 +480,7 @@ function renderServerPluginAuth() {
     serverPluginAuthStatus.textContent = "Code created. Type it here once to unlock installs.";
   }
   renderServerPluginInstalled();
+  renderManagedServerStatus();
 }
 
 function serverPluginCard(item) {
@@ -851,6 +886,57 @@ authorizeServerPluginsButton.addEventListener("click", async () => {
 
 refreshServerPluginsButton.addEventListener("click", () => {
   searchServerPlugins().catch(() => {});
+});
+
+openServerPluginsFolderButton.addEventListener("click", async () => {
+  try {
+    const result = await window.aeroApi.openServerPluginFolder({ address: serverPluginAddress.value });
+    statusText.textContent = `Opened plugins folder: ${result.path}`;
+  } catch (error) {
+    statusText.textContent = `Problem: ${error.message}`;
+  }
+});
+
+startManagedServerButton.addEventListener("click", async () => {
+  setBusy(true);
+  try {
+    await window.aeroApi.startManagedServer({ address: serverPluginAddress.value });
+    serverPluginState = await window.aeroApi.getServerPluginsState();
+    renderServerPluginAuth();
+    statusText.textContent = "Managed server starting. Plugins will load from the server folder.";
+  } catch (error) {
+    statusText.textContent = `Problem: ${error.message}`;
+  } finally {
+    setBusy(false);
+  }
+});
+
+restartManagedServerButton.addEventListener("click", async () => {
+  setBusy(true);
+  try {
+    await window.aeroApi.restartManagedServer({ address: serverPluginAddress.value });
+    serverPluginState = await window.aeroApi.getServerPluginsState();
+    renderServerPluginAuth();
+    statusText.textContent = "Managed server restart requested.";
+  } catch (error) {
+    statusText.textContent = `Problem: ${error.message}`;
+  } finally {
+    setBusy(false);
+  }
+});
+
+stopManagedServerButton.addEventListener("click", async () => {
+  setBusy(true);
+  try {
+    await window.aeroApi.stopManagedServer();
+    serverPluginState = await window.aeroApi.getServerPluginsState();
+    renderServerPluginAuth();
+    statusText.textContent = "Managed server stopping.";
+  } catch (error) {
+    statusText.textContent = `Problem: ${error.message}`;
+  } finally {
+    setBusy(false);
+  }
 });
 
 serverPluginSearch.addEventListener("keydown", (event) => {

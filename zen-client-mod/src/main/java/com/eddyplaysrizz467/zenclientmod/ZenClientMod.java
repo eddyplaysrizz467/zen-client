@@ -27,6 +27,7 @@ import java.util.Optional;
 import java.util.Set;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
@@ -182,6 +183,11 @@ public final class ZenClientMod implements ClientModInitializer {
     });
 
     ClientTickEvents.END_CLIENT_TICK.register(this::onEndTick);
+    ClientSendMessageEvents.ALLOW_COMMAND.register(command -> {
+      if (!command.trim().equalsIgnoreCase("restart")) return true;
+      requestManagedServerRestart(Minecraft.getInstance());
+      return false;
+    });
     ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> resetSession());
     HudRenderCallback.EVENT.register((drawContext, tickCounter) -> renderHud(Minecraft.getInstance(), drawContext));
   }
@@ -298,6 +304,8 @@ public final class ZenClientMod implements ClientModInitializer {
         }
         sendPlayerMessage(client, Component.literal("Zen plugin owner code: ")
           .append(copyableText(ownerCode, "Click to copy server plugin code")));
+        sendPlayerMessage(client, "To load plugins, authorize this server in Zen Client, install plugins, then press Start managed server.");
+        sendPlayerMessage(client, "When the managed server is running, type /restart to restart it with the same plugins.");
         sendPlayerMessage(client, "This public address only works from outside your Wi-Fi if port " + port + " is forwarded to this PC and Java/Minecraft is allowed through Windows Firewall.");
         CONFIG.saveFriendServer("My public hosted world", publicInvite);
       });
@@ -437,6 +445,32 @@ public final class ZenClientMod implements ClientModInitializer {
       .replace("\n", "\\n");
   }
 
+  private static void requestManagedServerRestart(Minecraft client) {
+    try {
+      String appData = System.getenv("APPDATA");
+      if (appData == null || appData.isBlank()) {
+        sendStaticPlayerMessage(client, "Zen Client restart request failed: APPDATA was not found.");
+        return;
+      }
+      Path appDir = Path.of(appData, "ZenClient");
+      Files.createDirectories(appDir);
+      String address = currentPreferredInvite(client);
+      if (address.isBlank() && client != null && client.getCurrentServer() != null) {
+        address = client.getCurrentServer().ip;
+      }
+      String json = "{\n"
+        + "  \"action\": \"restart\",\n"
+        + "  \"address\": \"" + escapeJson(address) + "\",\n"
+        + "  \"createdAt\": \"" + escapeJson(Instant.now().toString()) + "\",\n"
+        + "  \"nonce\": \"" + escapeJson(generateOwnerCode()) + "\"\n"
+        + "}\n";
+      Files.writeString(appDir.resolve("server-control-request.json"), json, StandardCharsets.UTF_8);
+      sendStaticPlayerMessage(client, "Asked Zen Client to restart the managed server with the same folder and plugins.");
+    } catch (Exception error) {
+      sendStaticPlayerMessage(client, "Zen Client restart request failed: " + error.getMessage());
+    }
+  }
+
   private static String fetchPublicIp() {
     String[] services = {
       "https://api.ipify.org",
@@ -494,13 +528,17 @@ public final class ZenClientMod implements ClientModInitializer {
   }
 
   private void sendPlayerMessage(Minecraft client, String message) {
-    if (client == null || client.player == null) return;
-    client.player.displayClientMessage(Component.literal(message), false);
+    sendStaticPlayerMessage(client, message);
   }
 
   private void sendPlayerMessage(Minecraft client, Component message) {
     if (client == null || client.player == null) return;
     client.player.displayClientMessage(message, false);
+  }
+
+  private static void sendStaticPlayerMessage(Minecraft client, String message) {
+    if (client == null || client.player == null) return;
+    client.player.displayClientMessage(Component.literal(message), false);
   }
 
   private void onEndTick(Minecraft client) {

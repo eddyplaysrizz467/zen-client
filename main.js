@@ -22,6 +22,7 @@ const OPTIMIZATION_STATE_FILE = path.join(OPTIMIZATION_DIR, "applied.json");
 const OPTIMIZATION_HISTORY_FILE = path.join(OPTIMIZATION_DIR, "history.log");
 const SERVER_WORKSPACE_DIR = path.join(APP_DIR, "servers");
 const SERVER_PLUGIN_CODE_FILE = path.join(APP_DIR, "server-plugin-codes.json");
+const SERVER_CONTROL_REQUEST_FILE = path.join(APP_DIR, "server-control-request.json");
 const DEFAULT_DISCORD_APP_ID = "1496668054803714058";
 const ZEN_CLIENT_BUNDLE_MANIFEST_FILENAME = "zen-client-bundles.json";
 const ZEN_CLIENT_MOD_FILENAME = "zen-client-fabric.jar";
@@ -40,6 +41,9 @@ let discordReady = false;
 let discordConnecting = false;
 let currentSession = null;
 let currentLaunchContext = null;
+let managedServer = null;
+let serverControlPollTimer = null;
+let lastServerControlRequestId = "";
 let logBuffer = [];
 let updatePollTimer = null;
 let currentUpdateState = {
@@ -1403,13 +1407,30 @@ function sanitizeServerPluginRecord(server) {
   };
 }
 
+function getManagedServerStatus() {
+  if (!managedServer) return { running: false, state: "stopped", message: "Server is stopped." };
+  return {
+    running: Boolean(managedServer.process && !managedServer.stopping),
+    state: managedServer.stopping ? "stopping" : "running",
+    address: managedServer.address,
+    port: managedServer.port,
+    version: managedServer.version,
+    rootDir: managedServer.rootDir,
+    pluginsDir: managedServer.pluginsDir,
+    playerCount: managedServer.playerCount,
+    idleSeconds: managedServer.idleSince ? Math.max(0, Math.floor((Date.now() - managedServer.idleSince) / 1000)) : 0,
+    message: managedServer.stopping ? "Server is stopping..." : `Running on ${managedServer.address}`
+  };
+}
+
 function getServerPluginsState() {
   importMinecraftServerCodes();
   const state = loadState();
   return {
     servers: Array.isArray(state.serverPlugins?.servers)
       ? state.serverPlugins.servers.map(sanitizeServerPluginRecord).filter((server) => server.address)
-      : []
+      : [],
+    managedServer: getManagedServerStatus()
   };
 }
 
@@ -1636,6 +1657,225 @@ async function installServerPlugin(payload) {
   appendLog(`[server] Installed ${title} into ${profile.pluginsDir}`);
   sendEvent("state-updated", getClientState());
   return { path: target, fileName: download.fileName };
+}
+
+function parseServerPort(address) {
+  const normalized = normalizeServerAddress(address);
+  const match = normalized.match(/:(\d+)$/);
+  const port = match ? Number.parseInt(match[1], 10) : 25565;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Server address needs a valid port.");
+  return port;
+}
+
+function managedServerVersion() {
+  const state = loadState();
+  const version = String(state.settings?.minecraftVersion || "").trim();
+  if (!/^1\.\d+(?:\.\d+)?$/.test(version)) {
+    throw new Error("Managed plugin servers need a normal release version that Paper supports. Pick a release version in the launcher first.");
+  }
+  return version;
+}
+
+async function ensurePaperServerJar(version, rootDir) {
+  ensureDir(rootDir);
+  const jarPath = path.join(rootDir, `paper-${version}.jar`);
+  if (fs.existsSync(jarPath) && fs.statSync(jarPath).size > 1_000_000) return jarPath;
+
+  const buildsUrl = `https://api.papermc.io/v2/projects/paper/versions/${encodeURIComponent(version)}/builds`;
+  const buildInfo = await fetchJson(buildsUrl);
+  const builds = Array.isArray(buildInfo?.builds) ? buildInfo.builds : [];
+  const build = builds.filter((item) => item.channel === "default").at(-1) || builds.at(-1);
+  const fileName = build?.downloads?.application?.name;
+  if (!build || !fileName) throw new Error(`Paper does not have a downloadable server for Minecraft ${version} yet.`);
+
+  const downloadUrl = `https://api.papermc.io/v2/projects/paper/versions/${encodeURIComponent(version)}/builds/${build.build}/downloads/${encodeURIComponent(fileName)}`;
+  appendLog(`[server] Downloading Paper ${version} build ${build.build}...`);
+  await downloadToFile(downloadUrl, jarPath);
+  return jarPath;
+}
+
+function writeManagedServerFiles(profile, version, port) {
+  const rootDir = serverProfileRoot(profile.address);
+  ensureDir(rootDir);
+  ensureDir(profile.pluginsDir);
+  fs.writeFileSync(path.join(rootDir, "eula.txt"), "eula=true\n", "utf8");
+
+  const propertiesPath = path.join(rootDir, "server.properties");
+  const existing = fs.existsSync(propertiesPath) ? fs.readFileSync(propertiesPath, "utf8") : "";
+  const lines = new Map();
+  existing.split(/\r?\n/).forEach((line) => {
+    const match = line.match(/^([^#=][^=]*)=(.*)$/);
+    if (match) lines.set(match[1], match[2]);
+  });
+  lines.set("server-port", String(port));
+  lines.set("motd", "Zen Client managed server");
+  lines.set("online-mode", "true");
+  lines.set("enable-command-block", "false");
+  lines.set("enable-query", "false");
+  lines.set("enable-rcon", "false");
+  lines.set("spawn-protection", "0");
+  const content = Array.from(lines.entries()).map(([key, value]) => `${key}=${value}`).join("\n") + "\n";
+  fs.writeFileSync(propertiesPath, content, "utf8");
+  return rootDir;
+}
+
+function updateManagedPlayerCount(count) {
+  if (!managedServer) return;
+  managedServer.playerCount = Math.max(0, Number(count) || 0);
+  managedServer.idleSince = managedServer.playerCount === 0 ? (managedServer.idleSince || Date.now()) : null;
+  sendEvent("state-updated", getClientState());
+}
+
+function handleManagedServerLine(line) {
+  if (!line.trim()) return;
+  appendLog(`[server] ${line}`);
+  const listMatch = line.match(/There are\s+(\d+)\s+of a max/i);
+  if (listMatch) {
+    updateManagedPlayerCount(Number.parseInt(listMatch[1], 10));
+    return;
+  }
+  if (/joined the game/i.test(line) && managedServer) {
+    updateManagedPlayerCount((managedServer.playerCount || 0) + 1);
+  } else if (/left the game/i.test(line) && managedServer) {
+    updateManagedPlayerCount(Math.max(0, (managedServer.playerCount || 0) - 1));
+  }
+}
+
+function scheduleManagedServerIdleChecks() {
+  if (!managedServer) return;
+  clearInterval(managedServer.idleInterval);
+  managedServer.idleInterval = setInterval(() => {
+    if (!managedServer?.process || managedServer.stopping) return;
+    try {
+      managedServer.process.stdin.write("list\n");
+    } catch {
+      // ignore closed stdin
+    }
+    if ((managedServer.playerCount || 0) === 0 && managedServer.idleSince && Date.now() - managedServer.idleSince >= 10 * 60 * 1000) {
+      stopManagedServer("idle").catch((error) => appendLog(`[server] Idle stop failed: ${formatInvokeError(error)}`));
+    }
+  }, 30_000);
+}
+
+async function startManagedServer(address) {
+  const profile = requireAuthorizedServer(address);
+  const version = managedServerVersion();
+  const port = parseServerPort(profile.address);
+  if (managedServer?.process && !managedServer.stopping) {
+    if (normalizeServerAddress(managedServer.address) === normalizeServerAddress(profile.address)) return getManagedServerStatus();
+    throw new Error("Stop the currently running managed server before starting a different one.");
+  }
+
+  const state = loadState();
+  const rootDir = writeManagedServerFiles(profile, version, port);
+  const jarPath = await ensurePaperServerJar(version, rootDir);
+  const javaPath = await findJavaExecutable(state.settings?.javaPath, state.settings?.minecraftDirectory || DEFAULT_ROOT, version);
+  const memoryMb = Math.max(1024, Math.min(Number(state.settings?.memoryMb || 4096), 8192));
+
+  appendLog(`[server] Starting managed Paper ${version} on ${profile.address}`);
+  const child = spawn(javaPath, [`-Xms512M`, `-Xmx${memoryMb}M`, "-jar", jarPath, "nogui"], {
+    cwd: rootDir,
+    windowsHide: true,
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+
+  managedServer = {
+    process: child,
+    address: profile.address,
+    port,
+    version,
+    rootDir,
+    pluginsDir: profile.pluginsDir,
+    playerCount: 0,
+    idleSince: Date.now(),
+    stopping: false,
+    restartAfterClose: false,
+    buffered: ""
+  };
+
+  const onData = (chunk) => {
+    if (!managedServer) return;
+    managedServer.buffered += chunk.toString();
+    const parts = managedServer.buffered.split(/\r?\n/);
+    managedServer.buffered = parts.pop() || "";
+    parts.forEach(handleManagedServerLine);
+  };
+  child.stdout.on("data", onData);
+  child.stderr.on("data", onData);
+  child.on("close", (code) => {
+    const previous = managedServer;
+    if (previous?.idleInterval) clearInterval(previous.idleInterval);
+    const shouldRestart = Boolean(previous?.restartAfterClose);
+    const restartAddress = previous?.address;
+    managedServer = null;
+    appendLog(`[server] Managed server closed with code ${code}.`);
+    sendEvent("state-updated", getClientState());
+    if (shouldRestart && restartAddress) {
+      startManagedServer(restartAddress).catch((error) => appendLog(`[server] Restart failed: ${formatInvokeError(error)}`));
+    }
+  });
+
+  scheduleManagedServerIdleChecks();
+  sendEvent("state-updated", getClientState());
+  return getManagedServerStatus();
+}
+
+async function stopManagedServer(reason = "manual") {
+  if (!managedServer?.process) return getManagedServerStatus();
+  managedServer.stopping = true;
+  const child = managedServer.process;
+  appendLog(`[server] Stopping managed server (${reason}).`);
+  try {
+    child.stdin.write("say this server has shutdown\n");
+    child.stdin.write("stop\n");
+  } catch {
+    child.kill();
+  }
+  setTimeout(() => {
+    if (managedServer?.process === child && !child.killed) child.kill();
+  }, 20_000);
+  sendEvent("state-updated", getClientState());
+  return getManagedServerStatus();
+}
+
+async function restartManagedServer(address) {
+  const target = normalizeServerAddress(address || managedServer?.address || "");
+  if (!target) throw new Error("Pick an authorized server address first.");
+  if (managedServer?.process) {
+    managedServer.restartAfterClose = true;
+    managedServer.address = target;
+    await stopManagedServer("restart");
+    return getManagedServerStatus();
+  }
+  return startManagedServer(target);
+}
+
+function openServerPluginFolder(address) {
+  const profile = requireAuthorizedServer(address);
+  ensureDir(profile.pluginsDir);
+  shell.openPath(profile.pluginsDir).then((result) => {
+    if (result) appendLog(`[server] Could not open plugin folder: ${result}`);
+  });
+  return { path: profile.pluginsDir };
+}
+
+function startServerControlWatcher() {
+  if (serverControlPollTimer) return;
+  serverControlPollTimer = setInterval(() => {
+    if (!fs.existsSync(SERVER_CONTROL_REQUEST_FILE)) return;
+    let request = null;
+    try {
+      request = JSON.parse(fs.readFileSync(SERVER_CONTROL_REQUEST_FILE, "utf8"));
+    } catch {
+      return;
+    }
+    const requestId = `${request?.action || ""}:${request?.createdAt || ""}:${request?.nonce || ""}`;
+    if (!requestId || requestId === lastServerControlRequestId) return;
+    lastServerControlRequestId = requestId;
+    if (String(request?.action || "").toLowerCase() === "restart") {
+      restartManagedServer(request.address || managedServer?.address).catch((error) => appendLog(`[server] /restart failed: ${formatInvokeError(error)}`));
+    }
+  }, 2000);
 }
 
 function saveSettings(settings) {
@@ -2947,6 +3187,10 @@ ipcMain.handle("serverPlugins:state", async () => getServerPluginsState());
 ipcMain.handle("serverPlugins:authorize", async (_event, payload) => authorizeServerPlugins(payload?.address, payload?.code));
 ipcMain.handle("serverPlugins:search", async (_event, payload) => searchServerPlugins(payload?.query));
 ipcMain.handle("serverPlugins:install", async (_event, payload) => installServerPlugin(payload));
+ipcMain.handle("serverPlugins:openFolder", async (_event, payload) => openServerPluginFolder(payload?.address));
+ipcMain.handle("serverPlugins:startManaged", async (_event, payload) => startManagedServer(payload?.address));
+ipcMain.handle("serverPlugins:stopManaged", async () => stopManagedServer("manual"));
+ipcMain.handle("serverPlugins:restartManaged", async (_event, payload) => restartManagedServer(payload?.address));
 ipcMain.handle("account:microsoftLogin", async () => {
   const account = await microsoftSignIn();
   return {
@@ -3252,6 +3496,7 @@ app.whenReady().then(() => {
   ensureDir(OPTIMIZATION_DIR);
   createWindow();
   initAutoUpdater();
+  startServerControlWatcher();
   setDiscordPresence();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
