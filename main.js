@@ -1,7 +1,6 @@
 const { app, BrowserWindow, ipcMain, nativeImage, Menu, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
-const os = require("os");
 const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
 const { Client, Authenticator } = require("minecraft-launcher-core");
@@ -22,6 +21,7 @@ const OPTIMIZATION_DIR = path.join(APP_DIR, "optimizations");
 const OPTIMIZATION_STATE_FILE = path.join(OPTIMIZATION_DIR, "applied.json");
 const OPTIMIZATION_HISTORY_FILE = path.join(OPTIMIZATION_DIR, "history.log");
 const SERVER_WORKSPACE_DIR = path.join(APP_DIR, "servers");
+const SERVER_PLUGIN_CODE_FILE = path.join(APP_DIR, "server-plugin-codes.json");
 const DEFAULT_DISCORD_APP_ID = "1496668054803714058";
 const ZEN_CLIENT_BUNDLE_MANIFEST_FILENAME = "zen-client-bundles.json";
 const ZEN_CLIENT_MOD_FILENAME = "zen-client-fabric.jar";
@@ -1300,37 +1300,6 @@ function selectAccount(accountId) {
   sendEvent("state-updated", getClientState());
 }
 
-function sanitizeFriend(friend) {
-  return {
-    id: String(friend?.id || crypto.randomUUID()),
-    name: String(friend?.name || "Friend").trim() || "Friend",
-    address: String(friend?.address || "").trim()
-  };
-}
-
-function addFriend(payload) {
-  const name = String(payload?.name || "").trim();
-  const address = String(payload?.address || "").trim();
-  if (!name) throw new Error("Type a friend name.");
-  if (!address || !/^[a-z0-9._:-]+$/i.test(address)) throw new Error("Type a join address like 192.168.1.25:52341.");
-
-  updateState((draft) => {
-    const friend = sanitizeFriend({ id: crypto.randomUUID(), name, address });
-    draft.friends = Array.isArray(draft.friends) ? draft.friends : [];
-    draft.friends.push(friend);
-  });
-  sendEvent("state-updated", getClientState());
-  return getClientState();
-}
-
-function removeFriend(friendId) {
-  updateState((draft) => {
-    draft.friends = (draft.friends || []).filter((friend) => friend.id !== friendId);
-  });
-  sendEvent("state-updated", getClientState());
-  return getClientState();
-}
-
 function normalizeServerAddress(address) {
   return String(address || "")
     .trim()
@@ -1359,15 +1328,6 @@ function hashOwnerCode(code) {
   return crypto.createHash("sha256").update(String(code || "").trim().toUpperCase()).digest("hex");
 }
 
-function generateOwnerCode() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let i = 0; i < 10; i += 1) {
-    code += alphabet[crypto.randomInt(0, alphabet.length)];
-  }
-  return code;
-}
-
 function sanitizeServerPluginRecord(server) {
   return {
     id: String(server?.id || serverProfileId(server?.address || "")),
@@ -1382,12 +1342,66 @@ function sanitizeServerPluginRecord(server) {
 }
 
 function getServerPluginsState() {
+  importMinecraftServerCodes();
   const state = loadState();
   return {
     servers: Array.isArray(state.serverPlugins?.servers)
       ? state.serverPlugins.servers.map(sanitizeServerPluginRecord).filter((server) => server.address)
       : []
   };
+}
+
+function importMinecraftServerCodes() {
+  if (!fs.existsSync(SERVER_PLUGIN_CODE_FILE)) return;
+  let parsed = null;
+  try {
+    parsed = JSON.parse(fs.readFileSync(SERVER_PLUGIN_CODE_FILE, "utf8"));
+  } catch {
+    return;
+  }
+
+  const incoming = Array.isArray(parsed?.servers) ? parsed.servers : [];
+  const valid = incoming
+    .map((server) => ({
+      address: normalizeServerAddress(server?.address),
+      ownerCodeHash: String(server?.ownerCodeHash || "").trim(),
+      pluginsDir: String(server?.pluginsDir || "").trim(),
+      createdAt: server?.createdAt || new Date().toISOString()
+    }))
+    .filter((server) => server.address && /^[a-f0-9]{64}$/i.test(server.ownerCodeHash));
+  if (!valid.length) return;
+
+  let changed = false;
+  updateState((draft) => {
+    draft.serverPlugins = draft.serverPlugins && typeof draft.serverPlugins === "object" ? draft.serverPlugins : {};
+    draft.serverPlugins.servers = Array.isArray(draft.serverPlugins.servers) ? draft.serverPlugins.servers : [];
+    for (const incomingServer of valid) {
+      let profile = findServerPluginProfile(draft, incomingServer.address);
+      if (!profile) {
+        profile = {
+          id: serverProfileId(incomingServer.address),
+          address: incomingServer.address,
+          installedPlugins: [],
+          createdAt: incomingServer.createdAt
+        };
+        draft.serverPlugins.servers.push(profile);
+        changed = true;
+      }
+      if (profile.ownerCodeHash !== incomingServer.ownerCodeHash) {
+        profile.ownerCodeHash = incomingServer.ownerCodeHash;
+        profile.codeUsed = false;
+        profile.authorized = false;
+        profile.lastCodeCreatedAt = incomingServer.createdAt;
+        changed = true;
+      }
+      const pluginsDir = incomingServer.pluginsDir || path.join(serverProfileRoot(incomingServer.address), "plugins");
+      if (profile.pluginsDir !== pluginsDir) {
+        profile.pluginsDir = pluginsDir;
+        changed = true;
+      }
+    }
+  });
+  if (changed) sendEvent("state-updated", getClientState());
 }
 
 function findServerPluginProfile(draft, address) {
@@ -1397,48 +1411,8 @@ function findServerPluginProfile(draft, address) {
   return draft.serverPlugins.servers.find((server) => normalizeServerAddress(server.address) === normalized) || null;
 }
 
-function createServerPluginHost(address) {
-  const normalized = assertServerAddress(address);
-  const code = generateOwnerCode();
-  const root = serverProfileRoot(normalized);
-  const pluginsDir = path.join(root, "plugins");
-  ensureDir(pluginsDir);
-
-  updateState((draft) => {
-    let profile = findServerPluginProfile(draft, normalized);
-    if (!profile) {
-      profile = {
-        id: serverProfileId(normalized),
-        address: normalized,
-        installedPlugins: [],
-        createdAt: new Date().toISOString()
-      };
-      draft.serverPlugins.servers.push(profile);
-    }
-    profile.pluginsDir = pluginsDir;
-    profile.ownerCodeHash = hashOwnerCode(code);
-    profile.codeUsed = false;
-    profile.authorized = false;
-    profile.lastCodeCreatedAt = new Date().toISOString();
-  });
-
-  writeText(path.join(root, "README.txt"), [
-    "Zen Client managed plugin workspace",
-    `Server: ${normalized}`,
-    "Put this plugins folder into your Paper/Spigot server, or point your server at this workspace.",
-    "OP players can use /stop on Paper/Spigot. Zen's managed stop flow broadcasts: this server has shutdown"
-  ].join("\n"));
-
-  sendEvent("state-updated", getClientState());
-  return {
-    code,
-    address: normalized,
-    pluginsDir,
-    note: "This one-time code unlocks plugin installs for this server profile."
-  };
-}
-
 function authorizeServerPlugins(address, code) {
+  importMinecraftServerCodes();
   const normalized = assertServerAddress(address);
   const cleanCode = String(code || "").trim().toUpperCase();
   if (!/^[A-Z0-9]{10}$/.test(cleanCode)) throw new Error("Type the 10-letter server code.");
@@ -1600,31 +1574,6 @@ async function installServerPlugin(payload) {
   appendLog(`[server] Installed ${title} into ${profile.pluginsDir}`);
   sendEvent("state-updated", getClientState());
   return { path: target, fileName: download.fileName };
-}
-
-function getPrimaryLocalAddress() {
-  const interfaces = os.networkInterfaces();
-  for (const entries of Object.values(interfaces)) {
-    for (const entry of entries || []) {
-      if (entry.family === "IPv4" && !entry.internal) return entry.address;
-    }
-  }
-  return "";
-}
-
-async function getPublicAddress() {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 5000);
-  try {
-    const response = await fetch("https://api.ipify.org?format=json", { signal: controller.signal });
-    if (!response.ok) return "";
-    const data = await response.json();
-    return String(data?.ip || "").trim();
-  } catch {
-    return "";
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 function saveSettings(settings) {
@@ -2932,21 +2881,7 @@ ipcMain.handle("account:select", async (_event, accountId) => {
   selectAccount(accountId);
   return getClientState();
 });
-ipcMain.handle("friends:add", async (_event, payload) => addFriend(payload));
-ipcMain.handle("friends:remove", async (_event, friendId) => removeFriend(String(friendId || "")));
-ipcMain.handle("friends:hostInfo", async () => {
-  const address = getPrimaryLocalAddress();
-  const publicIp = await getPublicAddress();
-  return {
-    localIp: address,
-    publicIp,
-    localAddress: address ? `${address}:<LAN port>` : "",
-    publicAddress: publicIp ? `${publicIp}:<LAN port>` : "",
-    note: "Use Host Zen LAN in-game, then replace <LAN port> with the port Minecraft shows in chat."
-  };
-});
 ipcMain.handle("serverPlugins:state", async () => getServerPluginsState());
-ipcMain.handle("serverPlugins:createHostCode", async (_event, payload) => createServerPluginHost(payload?.address));
 ipcMain.handle("serverPlugins:authorize", async (_event, payload) => authorizeServerPlugins(payload?.address, payload?.code));
 ipcMain.handle("serverPlugins:search", async (_event, payload) => searchServerPlugins(payload?.query));
 ipcMain.handle("serverPlugins:install", async (_event, payload) => installServerPlugin(payload));

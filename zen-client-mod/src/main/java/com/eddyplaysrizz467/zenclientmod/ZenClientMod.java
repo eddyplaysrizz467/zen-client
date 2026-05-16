@@ -9,6 +9,11 @@ import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
+import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -72,6 +77,8 @@ public final class ZenClientMod implements ClientModInitializer {
   private static final int HUD_BOX_PADDING = 4;
   private static final int HUD_BOX_HEIGHT = 18;
   private static final int HUD_BOX_GAP = 4;
+  private static final String OWNER_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  private static final SecureRandom OWNER_CODE_RANDOM = new SecureRandom();
 
   private static ZenClientMod INSTANCE;
   private static ZenConfig CONFIG;
@@ -122,6 +129,8 @@ public final class ZenClientMod implements ClientModInitializer {
   private static int aimAssistTargetId = -1;
   private static long aimAssistTargetExpiresAt = 0L;
   private static long aimAssistSuppressedUntil = 0L;
+  private static String lastSessionOwnerAddress = "";
+  private static String lastSessionOwnerCode = "";
 
   private static final class ProjectedPoint {
     private final int x;
@@ -234,9 +243,13 @@ public final class ZenClientMod implements ClientModInitializer {
 
   private void sendLanInviteMessages(Minecraft client, int port) {
     String localInvite = buildInviteAddress(bestLocalIp(), port);
+    String ownerCode = ownerCodeForInvite(localInvite);
     sendPlayerMessage(client, Component.literal("Zen LAN is open. Same-Wi-Fi invite: ")
-      .append(copyableInvite(localInvite)));
-    sendPlayerMessage(client, "Click the address to copy it. Friends outside your Wi-Fi need router port forwarding for this port.");
+      .append(copyableText(localInvite, "Click to copy invite")));
+    sendPlayerMessage(client, Component.literal("Zen plugin owner code: ")
+      .append(copyableText(ownerCode, "Click to copy server plugin code")));
+    sendPlayerMessage(client, "Click the invite/code to copy it. Put the code in Zen Client's Server Plugins tab to unlock installs for this server.");
+    sendPlayerMessage(client, "Friends outside your Wi-Fi need router port forwarding for this port.");
     CONFIG.saveFriendServer("My hosted world", localInvite);
 
     Thread publicIpThread = new Thread(() -> {
@@ -244,7 +257,7 @@ public final class ZenClientMod implements ClientModInitializer {
       if (publicInvite.isBlank() || publicInvite.equals(localInvite)) return;
       client.execute(() -> {
         sendPlayerMessage(client, Component.literal("Zen public invite if your router forwards the port: ")
-          .append(copyableInvite(publicInvite)));
+          .append(copyableText(publicInvite, "Click to copy public invite")));
         CONFIG.saveFriendServer("My public invite", publicInvite);
       });
     }, "Zen LAN public IP lookup");
@@ -252,12 +265,82 @@ public final class ZenClientMod implements ClientModInitializer {
     publicIpThread.start();
   }
 
-  private static MutableComponent copyableInvite(String invite) {
-    return Component.literal(invite).withStyle(style -> style
+  public static String currentServerOwnerCode() {
+    if (!lastSessionOwnerCode.isBlank()) return lastSessionOwnerCode;
+    return CONFIG == null ? "" : CONFIG.lastServerOwnerCode();
+  }
+
+  public static String currentServerOwnerAddress() {
+    if (!lastSessionOwnerAddress.isBlank()) return lastSessionOwnerAddress;
+    return CONFIG == null ? "" : CONFIG.lastServerOwnerAddress();
+  }
+
+  private static MutableComponent copyableText(String text, String hoverText) {
+    return Component.literal(text).withStyle(style -> style
       .withColor(ChatFormatting.AQUA)
       .withUnderlined(true)
-      .withClickEvent(new ClickEvent.CopyToClipboard(invite))
-      .withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to copy " + invite))));
+      .withClickEvent(new ClickEvent.CopyToClipboard(text))
+      .withHoverEvent(new HoverEvent.ShowText(Component.literal(hoverText))));
+  }
+
+  private static String ownerCodeForInvite(String invite) {
+    if (invite.equals(lastSessionOwnerAddress) && !lastSessionOwnerCode.isBlank()) return lastSessionOwnerCode;
+    String code = generateOwnerCode();
+    lastSessionOwnerAddress = invite;
+    lastSessionOwnerCode = code;
+    CONFIG.setLastServerOwnerCode(invite, code);
+    writeServerPluginCodeBridge(invite, code);
+    return code;
+  }
+
+  private static String generateOwnerCode() {
+    StringBuilder builder = new StringBuilder(10);
+    for (int i = 0; i < 10; i += 1) {
+      builder.append(OWNER_CODE_ALPHABET.charAt(OWNER_CODE_RANDOM.nextInt(OWNER_CODE_ALPHABET.length())));
+    }
+    return builder.toString();
+  }
+
+  private static void writeServerPluginCodeBridge(String address, String code) {
+    try {
+      String appData = System.getenv("APPDATA");
+      if (appData == null || appData.isBlank()) return;
+      Path appDir = Path.of(appData, "ZenClient");
+      Files.createDirectories(appDir);
+      String profileId = sha256Hex(address).substring(0, 16);
+      String pluginsDir = appDir.resolve("servers").resolve(profileId).resolve("plugins").toString();
+      Files.createDirectories(Path.of(pluginsDir));
+      String json = "{\n"
+        + "  \"servers\": [\n"
+        + "    {\n"
+        + "      \"address\": \"" + escapeJson(address) + "\",\n"
+        + "      \"ownerCodeHash\": \"" + sha256Hex(code) + "\",\n"
+        + "      \"pluginsDir\": \"" + escapeJson(pluginsDir) + "\",\n"
+        + "      \"createdAt\": \"" + escapeJson(Instant.now().toString()) + "\"\n"
+        + "    }\n"
+        + "  ]\n"
+        + "}\n";
+      Files.writeString(appDir.resolve("server-plugin-codes.json"), json, StandardCharsets.UTF_8);
+    } catch (Exception ignored) {
+      // The code still appears in chat even if the launcher bridge cannot be written.
+    }
+  }
+
+  private static String sha256Hex(String value) throws Exception {
+    byte[] digest = MessageDigest.getInstance("SHA-256").digest(String.valueOf(value).getBytes(StandardCharsets.UTF_8));
+    StringBuilder builder = new StringBuilder(digest.length * 2);
+    for (byte item : digest) {
+      builder.append(String.format("%02x", item));
+    }
+    return builder.toString();
+  }
+
+  private static String escapeJson(String value) {
+    return String.valueOf(value)
+      .replace("\\", "\\\\")
+      .replace("\"", "\\\"")
+      .replace("\r", "\\r")
+      .replace("\n", "\\n");
   }
 
   private static String fetchPublicIp() {

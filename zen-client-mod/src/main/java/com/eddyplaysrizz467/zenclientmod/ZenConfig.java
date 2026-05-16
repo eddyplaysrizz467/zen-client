@@ -38,6 +38,8 @@ public final class ZenConfig {
   private double aimAssistRange = 4.5D;
   private double aimAssistSmoothness = 0.18D;
   private double aimAssistBreakSensitivity = 2.0D;
+  private String lastServerOwnerAddress = "";
+  private String lastServerOwnerCode = "";
 
   public static ZenConfig load() {
     ZenConfig config = new ZenConfig();
@@ -87,6 +89,12 @@ public final class ZenConfig {
       if (root.has("aimAssistBreakSensitivity")) {
         config.aimAssistBreakSensitivity = clampAimAssistBreak(root.get("aimAssistBreakSensitivity").getAsDouble());
       }
+      if (root.has("lastServerOwnerAddress")) {
+        config.lastServerOwnerAddress = root.get("lastServerOwnerAddress").getAsString().trim();
+      }
+      if (root.has("lastServerOwnerCode")) {
+        config.lastServerOwnerCode = root.get("lastServerOwnerCode").getAsString().trim();
+      }
     } catch (Exception ignored) {
       // Keep defaults if the file is unreadable.
     }
@@ -113,6 +121,8 @@ public final class ZenConfig {
       root.addProperty("aimAssistRange", aimAssistRange);
       root.addProperty("aimAssistSmoothness", aimAssistSmoothness);
       root.addProperty("aimAssistBreakSensitivity", aimAssistBreakSensitivity);
+      root.addProperty("lastServerOwnerAddress", lastServerOwnerAddress);
+      root.addProperty("lastServerOwnerCode", lastServerOwnerCode);
       try (Writer writer = Files.newBufferedWriter(CONFIG_PATH, StandardCharsets.UTF_8)) {
         GSON.toJson(root, writer);
       }
@@ -199,6 +209,20 @@ public final class ZenConfig {
 
   public List<Map.Entry<String, String>> orderedFriendServers() {
     return new ArrayList<>(friendServers.entrySet());
+  }
+
+  public String lastServerOwnerAddress() {
+    return lastServerOwnerAddress;
+  }
+
+  public String lastServerOwnerCode() {
+    return lastServerOwnerCode;
+  }
+
+  public void setLastServerOwnerCode(String address, String code) {
+    lastServerOwnerAddress = address == null ? "" : address.trim();
+    lastServerOwnerCode = code == null ? "" : code.trim();
+    save();
   }
 
   public ZenFlightMode flightMode() {

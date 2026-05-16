@@ -13,14 +13,12 @@ const tabLauncher = document.getElementById("tabLauncher");
 const tabSettings = document.getElementById("tabSettings");
 const tabLibrary = document.getElementById("tabLibrary");
 const tabSkins = document.getElementById("tabSkins");
-const tabFriends = document.getElementById("tabFriends");
 const tabServerPlugins = document.getElementById("tabServerPlugins");
 const tabOptimize = document.getElementById("tabOptimize");
 const panelLauncher = document.getElementById("panelLauncher");
 const panelSettings = document.getElementById("panelSettings");
 const panelLibrary = document.getElementById("panelLibrary");
 const panelSkins = document.getElementById("panelSkins");
-const panelFriends = document.getElementById("panelFriends");
 const panelServerPlugins = document.getElementById("panelServerPlugins");
 const panelOptimize = document.getElementById("panelOptimize");
 
@@ -60,19 +58,7 @@ const modsList = document.getElementById("modsList");
 const packsList = document.getElementById("packsList");
 const refreshOptimizationsButton = document.getElementById("refreshOptimizationsButton");
 const optimizationsList = document.getElementById("optimizationsList");
-const refreshFriendsButton = document.getElementById("refreshFriendsButton");
-const hostAddressText = document.getElementById("hostAddressText");
-const publicAddressText = document.getElementById("publicAddressText");
-const copyInviteButton = document.getElementById("copyInviteButton");
-const hostPortInput = document.getElementById("hostPortInput");
-const friendForm = document.getElementById("friendForm");
-const friendName = document.getElementById("friendName");
-const friendAddress = document.getElementById("friendAddress");
-const friendsList = document.getElementById("friendsList");
 const serverPluginAddress = document.getElementById("serverPluginAddress");
-const createServerCodeButton = document.getElementById("createServerCodeButton");
-const copyServerCodeButton = document.getElementById("copyServerCodeButton");
-const serverPluginCodeBox = document.getElementById("serverPluginCodeBox");
 const serverPluginCodeInput = document.getElementById("serverPluginCodeInput");
 const authorizeServerPluginsButton = document.getElementById("authorizeServerPluginsButton");
 const serverPluginAuthStatus = document.getElementById("serverPluginAuthStatus");
@@ -109,10 +95,8 @@ let optimizationBusy = false;
 let bootFinished = false;
 let loadingFinished = false;
 let activeEnhancedSelect = null;
-let friendsHostInfo = { localIp: "", publicIp: "" };
 let serverPluginState = { servers: [] };
 let serverPluginResultsCache = [];
-let lastServerPluginCode = "";
 let serverPluginBusy = false;
 const activeBamboo = new Map();
 const BAMBOO_COUNT = 5;
@@ -132,9 +116,6 @@ function setBusy(nextBusy) {
     refreshModsButton,
     refreshPacksButton,
     refreshOptimizationsButton,
-    refreshFriendsButton,
-    createServerCodeButton,
-    copyServerCodeButton,
     authorizeServerPluginsButton,
     refreshServerPluginsButton
   ].forEach((button) => {
@@ -419,88 +400,6 @@ function renderHero() {
   }
 }
 
-function formatHostInvite(ip, port) {
-  const cleanIp = String(ip || "").trim();
-  const cleanPort = String(port || "").trim();
-  if (!cleanIp) return "";
-  return cleanPort ? `${cleanIp}:${cleanPort}` : `${cleanIp}:<port>`;
-}
-
-function updateFriendInviteAddresses() {
-  const port = hostPortInput?.value || "";
-  if (hostAddressText) {
-    hostAddressText.textContent = formatHostInvite(friendsHostInfo.localIp, port) || "No local network address found";
-  }
-  if (publicAddressText) {
-    publicAddressText.textContent = formatHostInvite(friendsHostInfo.publicIp, port) || "Public IP unavailable";
-  }
-}
-
-async function loadFriendsHostInfo() {
-  if (!hostAddressText) return;
-  hostAddressText.textContent = "Checking...";
-  if (publicAddressText) publicAddressText.textContent = "Checking...";
-  try {
-    const info = await window.aeroApi.getFriendsHostInfo();
-    friendsHostInfo = {
-      localIp: info.localIp || "",
-      publicIp: info.publicIp || ""
-    };
-    updateFriendInviteAddresses();
-  } catch (error) {
-    hostAddressText.textContent = `Problem: ${error.message}`;
-    if (publicAddressText) publicAddressText.textContent = "Public IP unavailable";
-  }
-}
-
-function renderFriends() {
-  if (!friendsList) return;
-  const friends = Array.isArray(state?.friends) ? state.friends : [];
-  friendsList.innerHTML = "";
-  if (!friends.length) {
-    friendsList.innerHTML = `<div class="empty-state">No friends saved yet.</div>`;
-    return;
-  }
-
-  friends.forEach((friend) => {
-    const card = document.createElement("div");
-    card.className = "friend-card";
-    const name = document.createElement("div");
-    name.className = "friend-name";
-    name.textContent = friend.name || "Friend";
-    const address = document.createElement("button");
-    address.className = "friend-address";
-    address.type = "button";
-    address.textContent = friend.address || "";
-    address.title = "Copy join address";
-    address.addEventListener("click", async () => {
-      await navigator.clipboard.writeText(friend.address || "");
-      statusText.textContent = `Copied ${friend.address}`;
-    });
-    const actions = document.createElement("div");
-    actions.className = "friend-actions";
-    const copy = document.createElement("button");
-    copy.className = "ghost";
-    copy.type = "button";
-    copy.textContent = "Copy";
-    copy.addEventListener("click", async () => {
-      await navigator.clipboard.writeText(friend.address || "");
-      statusText.textContent = `Copied ${friend.address}`;
-    });
-    const remove = document.createElement("button");
-    remove.className = "ghost";
-    remove.type = "button";
-    remove.textContent = "Remove";
-    remove.addEventListener("click", async () => {
-      state = await window.aeroApi.removeFriend(friend.id);
-      renderFriends();
-    });
-    actions.append(copy, remove);
-    card.append(name, address, actions);
-    friendsList.appendChild(card);
-  });
-}
-
 function currentServerPluginProfile() {
   const address = String(serverPluginAddress?.value || "").trim().toLowerCase();
   if (!address) return null;
@@ -627,6 +526,9 @@ function renderServerPluginResults() {
 async function loadServerPluginState() {
   if (!serverPluginAddress) return;
   serverPluginState = await window.aeroApi.getServerPluginsState();
+  if (!serverPluginAddress.value && Array.isArray(serverPluginState.servers) && serverPluginState.servers[0]) {
+    serverPluginAddress.value = serverPluginState.servers[0].address || "";
+  }
   renderServerPluginAuth();
 }
 
@@ -831,7 +733,6 @@ function syncFromState(nextState) {
   renderSettings();
   renderHero();
   renderUpdateNotice();
-  renderFriends();
   updateSkinControls();
 }
 
@@ -889,10 +790,10 @@ function setActiveTab(tabName) {
     { name: "settings", button: tabSettings, panel: panelSettings },
     { name: "library", button: tabLibrary, panel: panelLibrary },
     { name: "skins", button: tabSkins, panel: panelSkins },
-    { name: "friends", button: tabFriends, panel: panelFriends },
     { name: "server-plugins", button: tabServerPlugins, panel: panelServerPlugins },
     { name: "optimize", button: tabOptimize, panel: panelOptimize }
   ];
+  if (!tabs.some((tab) => tab.name === tabName)) tabName = "launcher";
   tabs.forEach(({ name, button, panel }) => {
     const active = name === tabName;
     button.classList.toggle("active", active);
@@ -901,7 +802,6 @@ function setActiveTab(tabName) {
   });
   localStorage.setItem("aeroTab", tabName);
   if (tabName === "skins") renderSkinHead();
-  if (tabName === "friends") loadFriendsHostInfo().catch(() => {});
   if (tabName === "server-plugins") loadServerPluginState().catch(() => {});
   if (tabName === "library") ensureLibraryLoaded().catch(() => {});
   if (tabName === "optimize") loadOptimizations().catch(() => {});
@@ -911,7 +811,6 @@ tabLauncher.addEventListener("click", () => setActiveTab("launcher"));
 tabSettings.addEventListener("click", () => setActiveTab("settings"));
 tabLibrary.addEventListener("click", () => setActiveTab("library"));
 tabSkins.addEventListener("click", () => setActiveTab("skins"));
-tabFriends.addEventListener("click", () => setActiveTab("friends"));
 tabServerPlugins.addEventListener("click", () => setActiveTab("server-plugins"));
 tabOptimize.addEventListener("click", () => setActiveTab("optimize"));
 
@@ -929,73 +828,8 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeEnhancedSelect();
 });
 
-refreshFriendsButton.addEventListener("click", () => {
-  loadFriendsHostInfo().catch(() => {});
-});
-
-hostPortInput.addEventListener("input", () => {
-  updateFriendInviteAddresses();
-});
-
-copyInviteButton.addEventListener("click", async () => {
-  const port = String(hostPortInput.value || "").trim();
-  const invite = formatHostInvite(friendsHostInfo.publicIp || friendsHostInfo.localIp, port);
-  if (!invite || invite.includes("<port>")) {
-    statusText.textContent = "Type the LAN port Minecraft shows first.";
-    return;
-  }
-  await navigator.clipboard.writeText(invite);
-  statusText.textContent = `Copied invite address ${invite}`;
-});
-
-friendForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  setBusy(true);
-  try {
-    state = await window.aeroApi.addFriend({
-      name: friendName.value,
-      address: friendAddress.value
-    });
-    friendName.value = "";
-    friendAddress.value = "";
-    renderFriends();
-    statusText.textContent = "Friend saved.";
-  } catch (error) {
-    statusText.textContent = `Problem: ${error.message}`;
-  } finally {
-    setBusy(false);
-  }
-});
-
 serverPluginAddress.addEventListener("change", () => {
   loadServerPluginState().catch(() => {});
-});
-
-createServerCodeButton.addEventListener("click", async () => {
-  setBusy(true);
-  try {
-    const result = await window.aeroApi.createServerPluginHostCode({
-      address: serverPluginAddress.value
-    });
-    lastServerPluginCode = result.code;
-    serverPluginCodeBox.textContent = result.code;
-    serverPluginCodeInput.value = result.code;
-    await loadServerPluginState();
-    statusText.textContent = "One-time server code created.";
-  } catch (error) {
-    statusText.textContent = `Problem: ${error.message}`;
-  } finally {
-    setBusy(false);
-  }
-});
-
-copyServerCodeButton.addEventListener("click", async () => {
-  if (!lastServerPluginCode) {
-    statusText.textContent = "Create a server code first.";
-    return;
-  }
-  await navigator.clipboard.writeText(lastServerPluginCode);
-  statusText.textContent = "Copied server code.";
 });
 
 authorizeServerPluginsButton.addEventListener("click", async () => {
