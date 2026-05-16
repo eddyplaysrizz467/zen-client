@@ -52,6 +52,7 @@
         <button id="tabLibrary" class="tab-button" type="button">Mods & Packs</button>
         <button id="tabSkins" class="tab-button" type="button">Skins</button>
         <button id="tabFriends" class="tab-button" type="button">Friends</button>
+        <button id="tabServerPlugins" class="tab-button" type="button">Server Plugins</button>
         <button id="tabOptimize" class="tab-button" type="button">Optimize</button>
       </nav>
 
@@ -356,6 +357,66 @@
 
             <div id="optimizationsList" class="optimizations-list">
               <div class="empty-state">Loading optimization checks...</div>
+            </div>
+          </div>
+        </section>
+
+        <section id="panelServerPlugins" class="tab-panel" aria-label="Server plugins panel">
+          <div class="card server-plugins-card">
+            <div class="card-head">
+              <h2>Server Plugins</h2>
+              <p>Authorize your hosted server with a one-time code, then install high-use Paper/Spigot plugins into its plugins folder.</p>
+            </div>
+
+            <div class="server-plugin-grid">
+              <div class="server-plugin-box">
+                <div class="library-title">1. Host lock</div>
+                <label>
+                  Server IP or domain
+                  <input id="serverPluginAddress" type="text" placeholder="192.168.1.25:25565" />
+                </label>
+                <div class="action-row">
+                  <button id="createServerCodeButton" class="primary" type="button">Create one-time code</button>
+                  <button id="copyServerCodeButton" class="ghost" type="button">Copy code</button>
+                </div>
+                <div id="serverPluginCodeBox" class="server-plugin-code">No code yet.</div>
+                <div class="hint">The code is 10 letters/numbers and can be used once. Generate a new one for a new server profile.</div>
+              </div>
+
+              <div class="server-plugin-box">
+                <div class="library-title">2. Unlock installs</div>
+                <label>
+                  One-time code
+                  <input id="serverPluginCodeInput" type="text" maxlength="10" placeholder="ABCDEFGHIJ" />
+                </label>
+                <button id="authorizeServerPluginsButton" class="primary wide" type="button">Authorize server</button>
+                <div id="serverPluginAuthStatus" class="hint">Authorize before installing plugins.</div>
+              </div>
+            </div>
+
+            <div class="library-title-row">
+              <div class="library-title">Plugin browser</div>
+              <div class="library-title-actions">
+                <button id="refreshServerPluginsButton" class="ghost" type="button">Search</button>
+              </div>
+            </div>
+
+            <label class="library-search">
+              Search plugins
+              <input id="serverPluginSearch" type="text" placeholder="WorldEdit, LuckPerms, Essentials..." />
+            </label>
+            <div class="hint">Modrinth results are filtered to 500k+ downloads. Spigot results are filtered to 100k+ downloads.</div>
+
+            <div id="serverPluginResults" class="library-list server-plugin-results">
+              <div class="empty-state">Authorize a server, then search for plugins.</div>
+            </div>
+
+            <div class="server-plugin-box">
+              <div class="library-title">Installed plugins</div>
+              <div id="serverPluginInstalledList" class="friends-list">
+                <div class="empty-state">No server profile selected yet.</div>
+              </div>
+              <div class="hint">OP players can use Paper/Spigot's built-in <code>/stop</code>. When Zen manages a future server process, it will say “this server has shutdown” before sending stop.</div>
             </div>
           </div>
         </section>

@@ -14,12 +14,14 @@ const tabSettings = document.getElementById("tabSettings");
 const tabLibrary = document.getElementById("tabLibrary");
 const tabSkins = document.getElementById("tabSkins");
 const tabFriends = document.getElementById("tabFriends");
+const tabServerPlugins = document.getElementById("tabServerPlugins");
 const tabOptimize = document.getElementById("tabOptimize");
 const panelLauncher = document.getElementById("panelLauncher");
 const panelSettings = document.getElementById("panelSettings");
 const panelLibrary = document.getElementById("panelLibrary");
 const panelSkins = document.getElementById("panelSkins");
 const panelFriends = document.getElementById("panelFriends");
+const panelServerPlugins = document.getElementById("panelServerPlugins");
 const panelOptimize = document.getElementById("panelOptimize");
 
 const launchType = document.getElementById("launchType");
@@ -67,6 +69,17 @@ const friendForm = document.getElementById("friendForm");
 const friendName = document.getElementById("friendName");
 const friendAddress = document.getElementById("friendAddress");
 const friendsList = document.getElementById("friendsList");
+const serverPluginAddress = document.getElementById("serverPluginAddress");
+const createServerCodeButton = document.getElementById("createServerCodeButton");
+const copyServerCodeButton = document.getElementById("copyServerCodeButton");
+const serverPluginCodeBox = document.getElementById("serverPluginCodeBox");
+const serverPluginCodeInput = document.getElementById("serverPluginCodeInput");
+const authorizeServerPluginsButton = document.getElementById("authorizeServerPluginsButton");
+const serverPluginAuthStatus = document.getElementById("serverPluginAuthStatus");
+const refreshServerPluginsButton = document.getElementById("refreshServerPluginsButton");
+const serverPluginSearch = document.getElementById("serverPluginSearch");
+const serverPluginResults = document.getElementById("serverPluginResults");
+const serverPluginInstalledList = document.getElementById("serverPluginInstalledList");
 
 const microsoftButton = document.getElementById("microsoftButton");
 const removeAccountButton = document.getElementById("removeAccountButton");
@@ -97,6 +110,10 @@ let bootFinished = false;
 let loadingFinished = false;
 let activeEnhancedSelect = null;
 let friendsHostInfo = { localIp: "", publicIp: "" };
+let serverPluginState = { servers: [] };
+let serverPluginResultsCache = [];
+let lastServerPluginCode = "";
+let serverPluginBusy = false;
 const activeBamboo = new Map();
 const BAMBOO_COUNT = 5;
 
@@ -115,9 +132,13 @@ function setBusy(nextBusy) {
     refreshModsButton,
     refreshPacksButton,
     refreshOptimizationsButton,
-    refreshFriendsButton
+    refreshFriendsButton,
+    createServerCodeButton,
+    copyServerCodeButton,
+    authorizeServerPluginsButton,
+    refreshServerPluginsButton
   ].forEach((button) => {
-    button.disabled = nextBusy;
+    if (button) button.disabled = nextBusy;
   });
 }
 
@@ -480,6 +501,150 @@ function renderFriends() {
   });
 }
 
+function currentServerPluginProfile() {
+  const address = String(serverPluginAddress?.value || "").trim().toLowerCase();
+  if (!address) return null;
+  return (serverPluginState.servers || []).find((server) => String(server.address || "").toLowerCase() === address) || null;
+}
+
+function renderServerPluginInstalled() {
+  if (!serverPluginInstalledList) return;
+  const profile = currentServerPluginProfile();
+  serverPluginInstalledList.innerHTML = "";
+  if (!profile) {
+    serverPluginInstalledList.innerHTML = `<div class="empty-state">Type or authorize a server to see its installed plugins.</div>`;
+    return;
+  }
+  const installed = Array.isArray(profile.installedPlugins) ? profile.installedPlugins : [];
+  if (!installed.length) {
+    serverPluginInstalledList.innerHTML = `<div class="empty-state">No plugins installed yet. Folder: ${profile.pluginsDir || "not created yet"}</div>`;
+    return;
+  }
+  installed.forEach((plugin) => {
+    const card = document.createElement("div");
+    card.className = "friend-card";
+    const name = document.createElement("div");
+    name.className = "friend-name";
+    name.textContent = plugin.title || plugin.fileName || "Plugin";
+    const meta = document.createElement("div");
+    meta.className = "friend-address static";
+    meta.textContent = `${plugin.source || "plugin"} • ${plugin.fileName || ""}`;
+    card.append(name, meta);
+    serverPluginInstalledList.appendChild(card);
+  });
+}
+
+function renderServerPluginAuth() {
+  const profile = currentServerPluginProfile();
+  if (!serverPluginAuthStatus) return;
+  if (!profile) {
+    serverPluginAuthStatus.textContent = "Authorize before installing plugins.";
+  } else if (profile.authorized) {
+    serverPluginAuthStatus.textContent = `Authorized. Installs go to ${profile.pluginsDir}`;
+  } else if (profile.codeUsed) {
+    serverPluginAuthStatus.textContent = "Code was already used. Create a new host code.";
+  } else {
+    serverPluginAuthStatus.textContent = "Code created. Type it here once to unlock installs.";
+  }
+  renderServerPluginInstalled();
+}
+
+function serverPluginCard(item) {
+  const row = document.createElement("div");
+  row.className = "library-item";
+
+  const title = document.createElement("div");
+  title.className = "library-item-title";
+  title.textContent = item.title || "Unknown plugin";
+
+  const meta = document.createElement("div");
+  meta.className = "library-item-meta";
+  meta.textContent = `${item.source === "spigot" ? "Spigot" : "Modrinth"} • ${formatDownloads(item.downloads)} downloads`;
+
+  const desc = document.createElement("div");
+  desc.className = "library-item-desc";
+  desc.textContent = item.description || "";
+
+  const actions = document.createElement("div");
+  actions.className = "library-item-actions";
+
+  const openBtn = document.createElement("button");
+  openBtn.className = "ghost";
+  openBtn.type = "button";
+  openBtn.textContent = "Open";
+  openBtn.addEventListener("click", () => {
+    if (item.url) window.aeroApi.openExternal(item.url).catch(() => {});
+  });
+
+  const installBtn = document.createElement("button");
+  installBtn.className = "primary";
+  installBtn.type = "button";
+  installBtn.textContent = "Install";
+  installBtn.disabled = serverPluginBusy || !currentServerPluginProfile()?.authorized;
+  installBtn.addEventListener("click", async () => {
+    serverPluginBusy = true;
+    installBtn.disabled = true;
+    installBtn.textContent = "Installing...";
+    statusText.textContent = `Installing ${item.title} into server plugins...`;
+    try {
+      await window.aeroApi.installServerPlugin({
+        address: serverPluginAddress.value,
+        source: item.source,
+        id: item.id,
+        title: item.title
+      });
+      serverPluginState = await window.aeroApi.getServerPluginsState();
+      installBtn.textContent = "Installed";
+      installBtn.className = "ghost";
+      statusText.textContent = `Installed ${item.title}.`;
+      renderServerPluginAuth();
+    } catch (error) {
+      installBtn.textContent = "Install";
+      installBtn.disabled = false;
+      statusText.textContent = `Problem: ${error.message}`;
+    } finally {
+      serverPluginBusy = false;
+    }
+  });
+
+  actions.append(openBtn, installBtn);
+  row.append(title, meta);
+  if (desc.textContent) row.append(desc);
+  row.append(actions);
+  return row;
+}
+
+function renderServerPluginResults() {
+  if (!serverPluginResults) return;
+  serverPluginResults.innerHTML = "";
+  if (!serverPluginResultsCache.length) {
+    serverPluginResults.innerHTML = `<div class="empty-state">No plugin results loaded yet.</div>`;
+    return;
+  }
+  serverPluginResultsCache.forEach((item) => serverPluginResults.appendChild(serverPluginCard(item)));
+}
+
+async function loadServerPluginState() {
+  if (!serverPluginAddress) return;
+  serverPluginState = await window.aeroApi.getServerPluginsState();
+  renderServerPluginAuth();
+}
+
+async function searchServerPlugins() {
+  if (!serverPluginResults) return;
+  serverPluginResults.innerHTML = `<div class="empty-state">Searching trusted plugin sources...</div>`;
+  try {
+    serverPluginResultsCache = await window.aeroApi.searchServerPlugins({
+      query: serverPluginSearch.value
+    });
+    renderServerPluginResults();
+    statusText.textContent = `Found ${serverPluginResultsCache.length} high-use server plugins.`;
+  } catch (error) {
+    serverPluginResults.innerHTML = `<div class="empty-state">Problem: ${error.message}</div>`;
+    statusText.textContent = `Problem: ${error.message}`;
+  }
+}
+
 function isSnapshotVersion(version) {
   const value = String(version || "").trim().toLowerCase();
   if (!value) return false;
@@ -725,6 +890,7 @@ function setActiveTab(tabName) {
     { name: "library", button: tabLibrary, panel: panelLibrary },
     { name: "skins", button: tabSkins, panel: panelSkins },
     { name: "friends", button: tabFriends, panel: panelFriends },
+    { name: "server-plugins", button: tabServerPlugins, panel: panelServerPlugins },
     { name: "optimize", button: tabOptimize, panel: panelOptimize }
   ];
   tabs.forEach(({ name, button, panel }) => {
@@ -736,6 +902,7 @@ function setActiveTab(tabName) {
   localStorage.setItem("aeroTab", tabName);
   if (tabName === "skins") renderSkinHead();
   if (tabName === "friends") loadFriendsHostInfo().catch(() => {});
+  if (tabName === "server-plugins") loadServerPluginState().catch(() => {});
   if (tabName === "library") ensureLibraryLoaded().catch(() => {});
   if (tabName === "optimize") loadOptimizations().catch(() => {});
 }
@@ -745,6 +912,7 @@ tabSettings.addEventListener("click", () => setActiveTab("settings"));
 tabLibrary.addEventListener("click", () => setActiveTab("library"));
 tabSkins.addEventListener("click", () => setActiveTab("skins"));
 tabFriends.addEventListener("click", () => setActiveTab("friends"));
+tabServerPlugins.addEventListener("click", () => setActiveTab("server-plugins"));
 tabOptimize.addEventListener("click", () => setActiveTab("optimize"));
 
 launchTypePicker.addEventListener("click", () => toggleEnhancedSelect(launchTypePicker, launchTypeMenu, launchType));
@@ -796,6 +964,65 @@ friendForm.addEventListener("submit", async (event) => {
     statusText.textContent = `Problem: ${error.message}`;
   } finally {
     setBusy(false);
+  }
+});
+
+serverPluginAddress.addEventListener("change", () => {
+  loadServerPluginState().catch(() => {});
+});
+
+createServerCodeButton.addEventListener("click", async () => {
+  setBusy(true);
+  try {
+    const result = await window.aeroApi.createServerPluginHostCode({
+      address: serverPluginAddress.value
+    });
+    lastServerPluginCode = result.code;
+    serverPluginCodeBox.textContent = result.code;
+    serverPluginCodeInput.value = result.code;
+    await loadServerPluginState();
+    statusText.textContent = "One-time server code created.";
+  } catch (error) {
+    statusText.textContent = `Problem: ${error.message}`;
+  } finally {
+    setBusy(false);
+  }
+});
+
+copyServerCodeButton.addEventListener("click", async () => {
+  if (!lastServerPluginCode) {
+    statusText.textContent = "Create a server code first.";
+    return;
+  }
+  await navigator.clipboard.writeText(lastServerPluginCode);
+  statusText.textContent = "Copied server code.";
+});
+
+authorizeServerPluginsButton.addEventListener("click", async () => {
+  setBusy(true);
+  try {
+    await window.aeroApi.authorizeServerPlugins({
+      address: serverPluginAddress.value,
+      code: serverPluginCodeInput.value
+    });
+    await loadServerPluginState();
+    renderServerPluginResults();
+    statusText.textContent = "Server authorized for plugin installs.";
+  } catch (error) {
+    statusText.textContent = `Problem: ${error.message}`;
+  } finally {
+    setBusy(false);
+  }
+});
+
+refreshServerPluginsButton.addEventListener("click", () => {
+  searchServerPlugins().catch(() => {});
+});
+
+serverPluginSearch.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    searchServerPlugins().catch(() => {});
   }
 });
 
@@ -1369,6 +1596,7 @@ window.aeroApi.onStateUpdated((nextState) => {
   if (stored === "skins") renderSkinHead();
   if (stored === "library") ensureLibraryLoaded().catch(() => {});
   if (stored === "optimize") loadOptimizations().catch(() => {});
+  if (stored === "server-plugins") loadServerPluginState().catch(() => {});
 });
 
 window.aeroApi.onUpdateStatus((nextStatus) => {
@@ -1398,6 +1626,7 @@ async function boot() {
   if (storedTab === "skins") renderSkinHead();
   if (storedTab === "library") ensureLibraryLoaded().catch(() => {});
   if (storedTab === "optimize") loadOptimizations().catch(() => {});
+  if (storedTab === "server-plugins") loadServerPluginState().catch(() => {});
   bootFinished = true;
   maybeFinishLoading();
 }

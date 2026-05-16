@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, nativeImage, Menu, shell } = require("elect
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
+const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
 const { Client, Authenticator } = require("minecraft-launcher-core");
 const { Auth, tokenUtils } = require("msmc");
@@ -20,6 +21,7 @@ const MANAGED_RUNTIME_DIR = path.join(APP_DIR, "runtime");
 const OPTIMIZATION_DIR = path.join(APP_DIR, "optimizations");
 const OPTIMIZATION_STATE_FILE = path.join(OPTIMIZATION_DIR, "applied.json");
 const OPTIMIZATION_HISTORY_FILE = path.join(OPTIMIZATION_DIR, "history.log");
+const SERVER_WORKSPACE_DIR = path.join(APP_DIR, "servers");
 const DEFAULT_DISCORD_APP_ID = "1496668054803714058";
 const ZEN_CLIENT_BUNDLE_MANIFEST_FILENAME = "zen-client-bundles.json";
 const ZEN_CLIENT_MOD_FILENAME = "zen-client-fabric.jar";
@@ -580,6 +582,9 @@ function defaultState() {
     accounts: [],
     selectedAccountId: null,
     friends: [],
+    serverPlugins: {
+      servers: []
+    },
     settings: {
       launchType: "Vanilla",
       minecraftVersion: "",
@@ -618,6 +623,11 @@ function loadState() {
       ...raw,
       accounts: Array.isArray(raw.accounts) ? raw.accounts : [],
       friends: Array.isArray(raw.friends) ? raw.friends : [],
+      serverPlugins: {
+        ...defaultState().serverPlugins,
+        ...(raw.serverPlugins || {}),
+        servers: Array.isArray(raw.serverPlugins?.servers) ? raw.serverPlugins.servers : []
+      },
       settings: {
         ...defaultState().settings,
         ...(raw.settings || {})
@@ -1319,6 +1329,277 @@ function removeFriend(friendId) {
   });
   sendEvent("state-updated", getClientState());
   return getClientState();
+}
+
+function normalizeServerAddress(address) {
+  return String(address || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "");
+}
+
+function assertServerAddress(address) {
+  const normalized = normalizeServerAddress(address);
+  if (!normalized || !/^[a-z0-9._:-]+$/i.test(normalized)) {
+    throw new Error("Type a server address like 192.168.1.25:25565.");
+  }
+  return normalized;
+}
+
+function serverProfileId(address) {
+  return crypto.createHash("sha256").update(normalizeServerAddress(address)).digest("hex").slice(0, 16);
+}
+
+function serverProfileRoot(address) {
+  return path.join(SERVER_WORKSPACE_DIR, serverProfileId(address));
+}
+
+function hashOwnerCode(code) {
+  return crypto.createHash("sha256").update(String(code || "").trim().toUpperCase()).digest("hex");
+}
+
+function generateOwnerCode() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 10; i += 1) {
+    code += alphabet[crypto.randomInt(0, alphabet.length)];
+  }
+  return code;
+}
+
+function sanitizeServerPluginRecord(server) {
+  return {
+    id: String(server?.id || serverProfileId(server?.address || "")),
+    address: normalizeServerAddress(server?.address || ""),
+    pluginsDir: String(server?.pluginsDir || ""),
+    authorized: Boolean(server?.authorized),
+    codeUsed: Boolean(server?.codeUsed),
+    createdAt: server?.createdAt || new Date().toISOString(),
+    lastAuthorizedAt: server?.lastAuthorizedAt || "",
+    installedPlugins: Array.isArray(server?.installedPlugins) ? server.installedPlugins : []
+  };
+}
+
+function getServerPluginsState() {
+  const state = loadState();
+  return {
+    servers: Array.isArray(state.serverPlugins?.servers)
+      ? state.serverPlugins.servers.map(sanitizeServerPluginRecord).filter((server) => server.address)
+      : []
+  };
+}
+
+function findServerPluginProfile(draft, address) {
+  const normalized = normalizeServerAddress(address);
+  draft.serverPlugins = draft.serverPlugins && typeof draft.serverPlugins === "object" ? draft.serverPlugins : {};
+  draft.serverPlugins.servers = Array.isArray(draft.serverPlugins.servers) ? draft.serverPlugins.servers : [];
+  return draft.serverPlugins.servers.find((server) => normalizeServerAddress(server.address) === normalized) || null;
+}
+
+function createServerPluginHost(address) {
+  const normalized = assertServerAddress(address);
+  const code = generateOwnerCode();
+  const root = serverProfileRoot(normalized);
+  const pluginsDir = path.join(root, "plugins");
+  ensureDir(pluginsDir);
+
+  updateState((draft) => {
+    let profile = findServerPluginProfile(draft, normalized);
+    if (!profile) {
+      profile = {
+        id: serverProfileId(normalized),
+        address: normalized,
+        installedPlugins: [],
+        createdAt: new Date().toISOString()
+      };
+      draft.serverPlugins.servers.push(profile);
+    }
+    profile.pluginsDir = pluginsDir;
+    profile.ownerCodeHash = hashOwnerCode(code);
+    profile.codeUsed = false;
+    profile.authorized = false;
+    profile.lastCodeCreatedAt = new Date().toISOString();
+  });
+
+  writeText(path.join(root, "README.txt"), [
+    "Zen Client managed plugin workspace",
+    `Server: ${normalized}`,
+    "Put this plugins folder into your Paper/Spigot server, or point your server at this workspace.",
+    "OP players can use /stop on Paper/Spigot. Zen's managed stop flow broadcasts: this server has shutdown"
+  ].join("\n"));
+
+  sendEvent("state-updated", getClientState());
+  return {
+    code,
+    address: normalized,
+    pluginsDir,
+    note: "This one-time code unlocks plugin installs for this server profile."
+  };
+}
+
+function authorizeServerPlugins(address, code) {
+  const normalized = assertServerAddress(address);
+  const cleanCode = String(code || "").trim().toUpperCase();
+  if (!/^[A-Z0-9]{10}$/.test(cleanCode)) throw new Error("Type the 10-letter server code.");
+
+  let authorized = null;
+  updateState((draft) => {
+    const profile = findServerPluginProfile(draft, normalized);
+    if (!profile) throw new Error("Create a host code for this server first.");
+    if (profile.authorized) {
+      authorized = sanitizeServerPluginRecord(profile);
+      return;
+    }
+    if (profile.codeUsed) throw new Error("That one-time code was already used. Generate a new host code.");
+    if (profile.ownerCodeHash !== hashOwnerCode(cleanCode)) throw new Error("Server code is not correct.");
+    profile.authorized = true;
+    profile.codeUsed = true;
+    profile.lastAuthorizedAt = new Date().toISOString();
+    profile.pluginsDir = profile.pluginsDir || path.join(serverProfileRoot(normalized), "plugins");
+    ensureDir(profile.pluginsDir);
+    authorized = sanitizeServerPluginRecord(profile);
+  });
+
+  sendEvent("state-updated", getClientState());
+  return authorized;
+}
+
+function requireAuthorizedServer(address) {
+  const normalized = assertServerAddress(address);
+  const state = loadState();
+  const profile = (state.serverPlugins?.servers || []).find((server) => normalizeServerAddress(server.address) === normalized);
+  if (!profile || !profile.authorized) throw new Error("Authorize this server with its one-time code first.");
+  const pluginsDir = profile.pluginsDir || path.join(serverProfileRoot(normalized), "plugins");
+  ensureDir(pluginsDir);
+  return { ...profile, address: normalized, pluginsDir };
+}
+
+function normalizePluginSearchResult(item) {
+  return {
+    source: item.source,
+    id: String(item.id || ""),
+    title: String(item.title || "Unknown plugin"),
+    description: String(item.description || ""),
+    downloads: Number(item.downloads || 0),
+    url: String(item.url || ""),
+    fileName: String(item.fileName || "")
+  };
+}
+
+async function searchModrinthServerPlugins(query) {
+  const url = new URL("https://api.modrinth.com/v2/search");
+  url.searchParams.set("index", "downloads");
+  url.searchParams.set("limit", "100");
+  url.searchParams.set("query", String(query || ""));
+  url.searchParams.set("facets", JSON.stringify([
+    ["project_type:mod"],
+    ["categories:paper", "categories:spigot", "categories:bukkit"]
+  ]));
+  const json = await modrinthFetchJson(url.toString());
+  return (Array.isArray(json?.hits) ? json.hits : [])
+    .filter((item) => Number(item.downloads || 0) >= 500000)
+    .map((item) => normalizePluginSearchResult({
+      source: "modrinth",
+      id: item.project_id,
+      title: item.title,
+      description: item.description,
+      downloads: item.downloads,
+      url: `https://modrinth.com/plugin/${item.slug || item.project_id}`
+    }));
+}
+
+async function searchSpigotPlugins(query) {
+  const cleanQuery = String(query || "popular").trim() || "popular";
+  const url = `https://api.spiget.org/v2/search/resources/${encodeURIComponent(cleanQuery)}?field=name&sort=-downloads&size=100`;
+  const response = await fetch(url, {
+    headers: { "User-Agent": "Zen Client" }
+  });
+  if (!response.ok) return [];
+  const json = await response.json();
+  return (Array.isArray(json) ? json : [])
+    .filter((item) => Number(item.downloads || 0) >= 100000)
+    .map((item) => normalizePluginSearchResult({
+      source: "spigot",
+      id: item.id,
+      title: item.name,
+      description: item.tag || item.description || "",
+      downloads: item.downloads,
+      url: `https://www.spigotmc.org/resources/${item.id}/`
+    }));
+}
+
+async function searchServerPlugins(query) {
+  const [modrinth, spigot] = await Promise.allSettled([
+    searchModrinthServerPlugins(query),
+    searchSpigotPlugins(query)
+  ]);
+  return [
+    ...(modrinth.status === "fulfilled" ? modrinth.value : []),
+    ...(spigot.status === "fulfilled" ? spigot.value : [])
+  ].sort((a, b) => Number(b.downloads || 0) - Number(a.downloads || 0));
+}
+
+async function pickModrinthPluginDownload(projectId) {
+  const versionsUrl = new URL(`https://api.modrinth.com/v2/project/${encodeURIComponent(projectId)}/version`);
+  versionsUrl.searchParams.set("loaders", JSON.stringify(["paper", "spigot", "bukkit"]));
+  const versions = await modrinthFetchJson(versionsUrl.toString());
+  const version = Array.isArray(versions) ? versions[0] : null;
+  const files = Array.isArray(version?.files) ? version.files : [];
+  const file = files.find((item) => item.primary) || files[0];
+  if (!file?.url) throw new Error("No downloadable plugin file found on Modrinth.");
+  return {
+    url: file.url,
+    fileName: path.basename(String(file.filename || `${projectId}.jar`))
+  };
+}
+
+async function downloadToFile(url, targetPath) {
+  const response = await fetch(url, { headers: { "User-Agent": "Zen Client" } });
+  if (!response.ok) throw new Error(`Download failed (${response.status}).`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  fs.writeFileSync(targetPath, buffer);
+}
+
+async function installServerPlugin(payload) {
+  const source = String(payload?.source || "").trim().toLowerCase();
+  const id = String(payload?.id || "").trim();
+  const title = String(payload?.title || id || "plugin").trim();
+  if (!id) throw new Error("Missing plugin id.");
+  const profile = requireAuthorizedServer(payload?.address);
+  let download = null;
+
+  if (source === "modrinth") {
+    download = await pickModrinthPluginDownload(id);
+  } else if (source === "spigot") {
+    download = {
+      url: `https://api.spiget.org/v2/resources/${encodeURIComponent(id)}/download`,
+      fileName: `${title.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "") || id}.jar`
+    };
+  } else {
+    throw new Error("Unsupported plugin source.");
+  }
+
+  const target = path.join(profile.pluginsDir, download.fileName);
+  await downloadToFile(download.url, target);
+
+  updateState((draft) => {
+    const server = findServerPluginProfile(draft, profile.address);
+    if (!server) return;
+    server.installedPlugins = Array.isArray(server.installedPlugins) ? server.installedPlugins : [];
+    server.installedPlugins = server.installedPlugins.filter((item) => !(item.source === source && String(item.id) === id));
+    server.installedPlugins.push({
+      source,
+      id,
+      title,
+      fileName: download.fileName,
+      installedAt: new Date().toISOString()
+    });
+  });
+
+  appendLog(`[server] Installed ${title} into ${profile.pluginsDir}`);
+  sendEvent("state-updated", getClientState());
+  return { path: target, fileName: download.fileName };
 }
 
 function getPrimaryLocalAddress() {
@@ -2664,6 +2945,11 @@ ipcMain.handle("friends:hostInfo", async () => {
     note: "Use Host Zen LAN in-game, then replace <LAN port> with the port Minecraft shows in chat."
   };
 });
+ipcMain.handle("serverPlugins:state", async () => getServerPluginsState());
+ipcMain.handle("serverPlugins:createHostCode", async (_event, payload) => createServerPluginHost(payload?.address));
+ipcMain.handle("serverPlugins:authorize", async (_event, payload) => authorizeServerPlugins(payload?.address, payload?.code));
+ipcMain.handle("serverPlugins:search", async (_event, payload) => searchServerPlugins(payload?.query));
+ipcMain.handle("serverPlugins:install", async (_event, payload) => installServerPlugin(payload));
 ipcMain.handle("account:microsoftLogin", async () => {
   const account = await microsoftSignIn();
   return {

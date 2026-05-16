@@ -1039,15 +1039,29 @@ input::placeholder {
   min-height: 0;
 }
 
+.server-plugins-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-height: 0;
+}
+
 .friends-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
   gap: 0.85rem;
 }
 
+.server-plugin-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.75fr);
+  gap: 0.85rem;
+}
+
 .friend-host-card,
 .friend-form,
-.friend-card {
+.friend-card,
+.server-plugin-box {
   border-radius: var(--radius-md);
   border: var(--border-soft);
   background:
@@ -1057,8 +1071,15 @@ input::placeholder {
 }
 
 .friend-host-card,
-.friend-form {
+.friend-form,
+.server-plugin-box {
   padding: 0.9rem;
+}
+
+.server-plugin-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
 }
 
 .friend-form {
@@ -1091,6 +1112,18 @@ input::placeholder {
   word-break: break-word;
 }
 
+.server-plugin-code {
+  min-height: 3rem;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px dashed rgba(216, 236, 211, 0.18);
+  color: var(--accent-strong);
+  font: 1.2rem/1 "Consolas", "Courier New", monospace;
+  letter-spacing: 0.16em;
+}
+
 .friends-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -1121,6 +1154,15 @@ input::placeholder {
   color: var(--accent-strong);
   font-family: "Consolas", "Courier New", monospace;
   box-shadow: none;
+}
+
+.friend-address.static {
+  cursor: default;
+}
+
+.server-plugin-results {
+  min-height: 18rem;
+  max-height: 28rem;
 }
 
 .friend-actions {
@@ -1389,6 +1431,10 @@ input::placeholder {
   }
 
   .friends-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .server-plugin-grid {
     grid-template-columns: 1fr;
   }
 
