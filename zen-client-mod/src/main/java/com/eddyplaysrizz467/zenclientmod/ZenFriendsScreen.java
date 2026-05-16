@@ -66,7 +66,7 @@ public final class ZenFriendsScreen extends Screen {
     int visibleBottom = this.height - BOTTOM_PADDING - 8;
 
     String invite = ZenClientMod.currentZenInviteCode(this.minecraft);
-    String realAddress = ZenClientMod.currentLanInvite(this.minecraft);
+    String realAddress = ZenClientMod.currentPreferredInvite(this.minecraft);
     boolean hasInvite = !invite.isBlank();
 
     addRenderableWidget(Button.builder(
@@ -77,7 +77,7 @@ public final class ZenFriendsScreen extends Screen {
 
     addRenderableWidget(Button.builder(
         Component.literal("Copy Real IP"),
-        button -> ZenClientMod.copyToClipboard(this.minecraft, ZenClientMod.currentLanInvite(this.minecraft)))
+        button -> ZenClientMod.copyToClipboard(this.minecraft, ZenClientMod.currentPreferredInvite(this.minecraft)))
       .bounds(panelLeft + 136, TOP_PADDING, 96, 20)
       .build()).active = hasInvite && !realAddress.isBlank();
 

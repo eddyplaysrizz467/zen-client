@@ -137,6 +137,7 @@ public final class ZenClientMod implements ClientModInitializer {
   private static long aimAssistSuppressedUntil = 0L;
   private static String lastSessionOwnerAddress = "";
   private static String lastSessionOwnerCode = "";
+  private static String lastSessionPublicInvite = "";
 
   private static final class ProjectedPoint {
     private final int x;
@@ -222,8 +223,17 @@ public final class ZenClientMod implements ClientModInitializer {
   }
 
   public static String currentZenInviteCode(Minecraft client) {
-    String address = currentLanInvite(client);
+    String address = currentPreferredInvite(client);
     return address.isBlank() ? "" : encodeZenInvite(address);
+  }
+
+  public static String currentPreferredInvite(Minecraft client) {
+    if (!lastSessionPublicInvite.isBlank()) return lastSessionPublicInvite;
+    return currentLanInvite(client);
+  }
+
+  public static String currentPublicInvite() {
+    return lastSessionPublicInvite;
   }
 
   public static void copyToClipboard(Minecraft client, String text) {
@@ -265,29 +275,37 @@ public final class ZenClientMod implements ClientModInitializer {
   }
 
   private void sendLanInviteMessages(Minecraft client, int port) {
+    lastSessionPublicInvite = "";
     String localInvite = buildInviteAddress(bestLocalIp(), port);
     String zenInvite = encodeZenInvite(localInvite);
     String ownerCode = ownerCodeForInvite(localInvite);
-    sendPlayerMessage(client, Component.literal("Zen LAN is open. Zen invite code: ")
-      .append(copyableText(zenInvite, "Click to copy Zen invite")));
-    sendPlayerMessage(client, Component.literal("Normal Minecraft address: ")
-      .append(copyableText(localInvite, "Click to copy real address")));
+    sendPlayerMessage(client, Component.literal("Zen LAN is open. Same-Wi-Fi Zen invite: ")
+      .append(copyableText(zenInvite, "Click to copy same-Wi-Fi Zen invite")));
+    sendPlayerMessage(client, Component.literal("Same-Wi-Fi Minecraft address: ")
+      .append(copyableText(localInvite, "Click to copy same-Wi-Fi address")));
     sendPlayerMessage(client, Component.literal("Zen plugin owner code: ")
       .append(copyableText(ownerCode, "Click to copy server plugin code")));
-    sendPlayerMessage(client, "Zen users can use the Zen invite code. Normal Minecraft users still need the real address.");
-    sendPlayerMessage(client, "Friends outside your Wi-Fi still need router port forwarding or a tunnel for this port.");
-    CONFIG.saveFriendServer("My hosted world", zenInvite);
+    sendPlayerMessage(client, "Looking up your real public IP for friends outside your Wi-Fi...");
+    sendPlayerMessage(client, "If outside friends get getsockopt/refused, your router or Windows Firewall is blocking this port.");
+    CONFIG.saveFriendServer("My same-Wi-Fi hosted world", zenInvite);
 
     Thread publicIpThread = new Thread(() -> {
-      String publicInvite = buildInviteAddress(fetchPublicIp(), port);
-      if (publicInvite.isBlank() || publicInvite.equals(localInvite)) return;
+      String publicIp = fetchPublicIp();
+      String publicInvite = buildInviteAddress(publicIp, port);
       client.execute(() -> {
+        if (publicInvite.isBlank() || publicInvite.equals(localInvite)) {
+          sendPlayerMessage(client, "Zen could not find a different real public IP. Use the same-Wi-Fi address locally, or set up port forwarding/tunnel for outside friends.");
+          return;
+        }
+        lastSessionPublicInvite = publicInvite;
         String publicZenInvite = encodeZenInvite(publicInvite);
-        sendPlayerMessage(client, Component.literal("Zen public invite if your router forwards the port: ")
+        writeServerPluginCodeBridge(publicInvite, ownerCode);
+        sendPlayerMessage(client, Component.literal("Real public Zen invite for outside friends: ")
           .append(copyableText(publicZenInvite, "Click to copy public Zen invite")));
-        sendPlayerMessage(client, Component.literal("Normal public address: ")
+        sendPlayerMessage(client, Component.literal("Real public Minecraft address: ")
           .append(copyableText(publicInvite, "Click to copy public address")));
-        CONFIG.saveFriendServer("My public invite", publicZenInvite);
+        sendPlayerMessage(client, "This public address only works from outside your Wi-Fi if port " + port + " is forwarded to this PC and Java/Minecraft is allowed through Windows Firewall.");
+        CONFIG.saveFriendServer("My public hosted world", publicZenInvite);
       });
     }, "Zen LAN public IP lookup");
     publicIpThread.setDaemon(true);
@@ -424,18 +442,44 @@ public final class ZenClientMod implements ClientModInitializer {
   }
 
   private static String fetchPublicIp() {
-    try {
-      HttpURLConnection connection = (HttpURLConnection) URI.create("https://api.ipify.org").toURL().openConnection();
-      connection.setConnectTimeout(2000);
-      connection.setReadTimeout(2000);
-      connection.setRequestMethod("GET");
-      try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
-        String line = reader.readLine();
-        return line == null ? "" : line.trim();
+    String[] services = {
+      "https://api.ipify.org",
+      "https://checkip.amazonaws.com",
+      "https://ifconfig.me/ip"
+    };
+    for (String service : services) {
+      try {
+        HttpURLConnection connection = (HttpURLConnection) URI.create(service).toURL().openConnection();
+        connection.setConnectTimeout(2500);
+        connection.setReadTimeout(2500);
+        connection.setRequestMethod("GET");
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
+          String line = reader.readLine();
+          String ip = line == null ? "" : line.trim();
+          if (isPublicIpv4(ip)) return ip;
+        }
+      } catch (Exception ignored) {
+        // Try the next public IP service.
       }
-    } catch (Exception ignored) {
-      return "";
     }
+    return "";
+  }
+
+  private static boolean isPublicIpv4(String ip) {
+    if (ip == null || !ip.matches("\\d{1,3}(\\.\\d{1,3}){3}")) return false;
+    String[] parts = ip.split("\\.");
+    int first = Integer.parseInt(parts[0]);
+    int second = Integer.parseInt(parts[1]);
+    for (String part : parts) {
+      int value = Integer.parseInt(part);
+      if (value < 0 || value > 255) return false;
+    }
+    if (first == 10 || first == 127 || first == 0) return false;
+    if (first == 172 && second >= 16 && second <= 31) return false;
+    if (first == 192 && second == 168) return false;
+    if (first == 169 && second == 254) return false;
+    if (first >= 224) return false;
+    return true;
   }
 
   private void showZenToast(Minecraft client, String title, String message) {
@@ -555,6 +599,7 @@ public final class ZenClientMod implements ClientModInitializer {
     aimAssistTargetId = -1;
     aimAssistTargetExpiresAt = 0L;
     aimAssistSuppressedUntil = 0L;
+    lastSessionPublicInvite = "";
     ESP_ENTITY_IDS.clear();
     lastJumpDown = false;
   }
