@@ -1,8 +1,17 @@
 package com.eddyplaysrizz467.zenclientmod;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashSet;
@@ -23,8 +32,12 @@ import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.server.IntegratedServer;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.util.HttpUtil;
 import net.minecraft.util.Mth;
@@ -145,6 +158,11 @@ public final class ZenClientMod implements ClientModInitializer {
           .bounds(6, 30, 150, 20)
           .build()
       );
+      Screens.getButtons(screen).add(
+        Button.builder(Component.literal("Zen Friends"), button -> client.setScreen(new ZenFriendsScreen(screen)))
+          .bounds(6, 54, 150, 20)
+          .build()
+      );
     });
 
     ClientTickEvents.END_CLIENT_TICK.register(this::onEndTick);
@@ -166,7 +184,7 @@ public final class ZenClientMod implements ClientModInitializer {
 
     if (server.isPublished()) {
       showZenToast(client, "Zen LAN already open", "Port " + server.getPort());
-      sendPlayerMessage(client, "Zen LAN is already open on port " + server.getPort() + ".");
+      sendLanInviteMessages(client, server.getPort());
       return;
     }
 
@@ -174,10 +192,86 @@ public final class ZenClientMod implements ClientModInitializer {
     boolean published = server.publishServer(GameType.SURVIVAL, false, port);
     if (published) {
       showZenToast(client, "Zen LAN is open", "Port " + server.getPort());
-      sendPlayerMessage(client, "Zen LAN hosted from this PC on port " + server.getPort() + ". Put this port in the launcher Friends tab, then copy the invite address.");
+      sendLanInviteMessages(client, server.getPort());
     } else {
       showZenToast(client, "Zen LAN failed", "Could not open a local port.");
       sendPlayerMessage(client, "Zen LAN could not open. Check firewall permissions and try again.");
+    }
+  }
+
+  public static String currentLanInvite(Minecraft client) {
+    if (client == null || !client.hasSingleplayerServer()) return "";
+    IntegratedServer server = client.getSingleplayerServer();
+    if (server == null || !server.isPublished()) return "";
+    return buildInviteAddress(bestLocalIp(), server.getPort());
+  }
+
+  public static void copyToClipboard(Minecraft client, String text) {
+    if (client == null || text == null || text.isBlank()) return;
+    client.keyboardHandler.setClipboard(text);
+  }
+
+  static String buildInviteAddress(String host, int port) {
+    if (host == null || host.isBlank() || port <= 0) return "";
+    return host + ":" + port;
+  }
+
+  static String bestLocalIp() {
+    try {
+      for (NetworkInterface networkInterface : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+        if (!networkInterface.isUp() || networkInterface.isLoopback() || networkInterface.isVirtual()) continue;
+        for (InetAddress address : Collections.list(networkInterface.getInetAddresses())) {
+          if (address instanceof Inet4Address && !address.isLoopbackAddress() && !address.isLinkLocalAddress()) {
+            return address.getHostAddress();
+          }
+        }
+      }
+    } catch (Exception ignored) {
+      // Fall through to localhost when Windows blocks network adapter inspection.
+    }
+    return "127.0.0.1";
+  }
+
+  private void sendLanInviteMessages(Minecraft client, int port) {
+    String localInvite = buildInviteAddress(bestLocalIp(), port);
+    sendPlayerMessage(client, Component.literal("Zen LAN is open. Same-Wi-Fi invite: ")
+      .append(copyableInvite(localInvite)));
+    sendPlayerMessage(client, "Click the address to copy it. Friends outside your Wi-Fi need router port forwarding for this port.");
+    CONFIG.saveFriendServer("My hosted world", localInvite);
+
+    Thread publicIpThread = new Thread(() -> {
+      String publicInvite = buildInviteAddress(fetchPublicIp(), port);
+      if (publicInvite.isBlank() || publicInvite.equals(localInvite)) return;
+      client.execute(() -> {
+        sendPlayerMessage(client, Component.literal("Zen public invite if your router forwards the port: ")
+          .append(copyableInvite(publicInvite)));
+        CONFIG.saveFriendServer("My public invite", publicInvite);
+      });
+    }, "Zen LAN public IP lookup");
+    publicIpThread.setDaemon(true);
+    publicIpThread.start();
+  }
+
+  private static MutableComponent copyableInvite(String invite) {
+    return Component.literal(invite).withStyle(style -> style
+      .withColor(ChatFormatting.AQUA)
+      .withUnderlined(true)
+      .withClickEvent(new ClickEvent.CopyToClipboard(invite))
+      .withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to copy " + invite))));
+  }
+
+  private static String fetchPublicIp() {
+    try {
+      HttpURLConnection connection = (HttpURLConnection) URI.create("https://api.ipify.org").toURL().openConnection();
+      connection.setConnectTimeout(2000);
+      connection.setReadTimeout(2000);
+      connection.setRequestMethod("GET");
+      try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
+        String line = reader.readLine();
+        return line == null ? "" : line.trim();
+      }
+    } catch (Exception ignored) {
+      return "";
     }
   }
 
@@ -194,6 +288,11 @@ public final class ZenClientMod implements ClientModInitializer {
   private void sendPlayerMessage(Minecraft client, String message) {
     if (client == null || client.player == null) return;
     client.player.displayClientMessage(Component.literal(message), false);
+  }
+
+  private void sendPlayerMessage(Minecraft client, Component message) {
+    if (client == null || client.player == null) return;
+    client.player.displayClientMessage(message, false);
   }
 
   private void onEndTick(Minecraft client) {

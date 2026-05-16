@@ -2,6 +2,7 @@ package com.eddyplaysrizz467.zenclientmod;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.io.IOException;
@@ -11,8 +12,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 
 public final class ZenConfig {
   private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -29,6 +32,7 @@ public final class ZenConfig {
   private final LinkedHashSet<String> enabledIds = new LinkedHashSet<>();
   private final LinkedHashSet<String> espTargetIds = new LinkedHashSet<>();
   private final LinkedHashSet<String> friendlyPlayerNames = new LinkedHashSet<>();
+  private final LinkedHashMap<String, String> friendServers = new LinkedHashMap<>();
   private String flightModeId = ZenFlightMode.VANILLA.id();
   private double flightSpeed = 1.0D;
   private double aimAssistRange = 4.5D;
@@ -59,6 +63,15 @@ public final class ZenConfig {
           if (!name.isBlank()) config.friendlyPlayerNames.add(name.toLowerCase(java.util.Locale.ROOT));
         });
       }
+      if (root.has("friendServers") && root.get("friendServers").isJsonArray()) {
+        root.getAsJsonArray("friendServers").forEach(element -> {
+          if (!element.isJsonObject()) return;
+          JsonObject friend = element.getAsJsonObject();
+          String name = friend.has("name") ? friend.get("name").getAsString().trim() : "";
+          String address = friend.has("address") ? friend.get("address").getAsString().trim() : "";
+          if (!name.isBlank() && !address.isBlank()) config.friendServers.put(name, address);
+        });
+      }
       if (root.has("flightMode")) {
         config.flightModeId = ZenFlightMode.byId(root.get("flightMode").getAsString()).id();
       }
@@ -87,6 +100,14 @@ public final class ZenConfig {
       root.add("enabled", GSON.toJsonTree(enabledIds));
       root.add("espTargets", GSON.toJsonTree(espTargetIds));
       root.add("friendlyPlayers", GSON.toJsonTree(friendlyPlayerNames));
+      JsonArray friendServerArray = new JsonArray();
+      friendServers.forEach((name, address) -> {
+        JsonObject friend = new JsonObject();
+        friend.addProperty("name", name);
+        friend.addProperty("address", address);
+        friendServerArray.add(friend);
+      });
+      root.add("friendServers", friendServerArray);
       root.addProperty("flightMode", flightModeId);
       root.addProperty("flightSpeed", flightSpeed);
       root.addProperty("aimAssistRange", aimAssistRange);
@@ -160,6 +181,24 @@ public final class ZenConfig {
 
   public List<String> orderedFriendlyPlayers() {
     return new ArrayList<>(friendlyPlayerNames);
+  }
+
+  public void saveFriendServer(String name, String address) {
+    String cleanName = name == null ? "" : name.trim();
+    String cleanAddress = address == null ? "" : address.trim();
+    if (cleanName.isBlank() || cleanAddress.isBlank()) return;
+    friendServers.put(cleanName, cleanAddress);
+    save();
+  }
+
+  public void removeFriendServer(String name) {
+    if (name == null) return;
+    friendServers.remove(name);
+    save();
+  }
+
+  public List<Map.Entry<String, String>> orderedFriendServers() {
+    return new ArrayList<>(friendServers.entrySet());
   }
 
   public ZenFlightMode flightMode() {
