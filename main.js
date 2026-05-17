@@ -28,6 +28,12 @@ const DEFAULT_DISCORD_APP_ID = "1496668054803714058";
 const ZEN_CLIENT_BUNDLE_MANIFEST_FILENAME = "zen-client-bundles.json";
 const ZEN_CLIENT_MOD_FILENAME = "zen-client-fabric.jar";
 const ZEN_CLIENT_MOD_FILENAME_TEMPLATE = "zen-client-fabric-%VERSION%.jar";
+const BUNDLED_ZEN_CLIENT_MOD_NAMES = new Set([
+  "zen-client-fabric.jar",
+  "zen-client-quilt.jar",
+  "zen-client-forge.jar",
+  "zen-client-neoforge.jar"
+]);
 const AUTH_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
 const ZEN_INVITE_PREFIX = "ZEN-";
 const ZEN_INVITE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -168,6 +174,19 @@ function recordInstalledModrinthFile(minecraftRoot, fileName, meta) {
   writeInstanceManifest(minecraftRoot, manifest);
 }
 
+function isZenManagedModManifestEntry(entry) {
+  return Boolean(entry && typeof entry === "object" && entry.projectType === "mod");
+}
+
+function isZenBundledModManifestEntry(entry) {
+  return isZenManagedModManifestEntry(entry) && String(entry.slug || "").startsWith("zen-client-");
+}
+
+function isZenManagedModFile(minecraftRoot, fileName) {
+  const manifest = readInstanceManifest(minecraftRoot);
+  return isZenManagedModManifestEntry(manifest[fileName]);
+}
+
 function parseMinecraftVersionHints(fileName) {
   const matches = String(fileName || "").match(/1\.\d+(?:\.\d+)?/g);
   return Array.from(new Set(matches || []));
@@ -225,7 +244,10 @@ function auditInstanceMods(minecraftRoot, selectedVersion, selectedLoader) {
     if (!entry.isFile()) continue;
     if (!entry.name.toLowerCase().endsWith(".jar")) continue;
 
-    const reason = modLooksIncompatible(entry.name, selectedVersion, selectedLoader, manifest[entry.name]);
+    const manifestEntry = manifest[entry.name];
+    if (!isZenManagedModManifestEntry(manifestEntry)) continue;
+
+    const reason = modLooksIncompatible(entry.name, selectedVersion, selectedLoader, manifestEntry);
     if (!reason) continue;
 
     ensureDir(disabledDir);
@@ -361,6 +383,7 @@ function recoverFromLaunchCrash(minecraftRoot, exitCode) {
 
   const moved = [];
   for (const item of recoveries.slice(0, 2)) {
+    if (!isZenManagedModFile(minecraftRoot, item.jar)) continue;
     const result = moveModToDisabled(minecraftRoot, item.jar, item.reason);
     if (result) moved.push(result);
   }
@@ -1065,17 +1088,24 @@ function removeBundledZenClientMods(minecraftRoot, reason, keepName = "") {
   const modsDir = path.join(minecraftRoot, "mods");
   if (!fs.existsSync(modsDir)) return;
 
-  for (const staleName of ["zen-client-fabric.jar", "zen-client-quilt.jar", "zen-client-forge.jar", "zen-client-neoforge.jar"]) {
+  const manifest = readInstanceManifest(minecraftRoot);
+  for (const staleName of BUNDLED_ZEN_CLIENT_MOD_NAMES) {
     if (staleName === keepName) continue;
     const stalePath = path.join(modsDir, staleName);
     if (!fs.existsSync(stalePath)) continue;
+    if (!isZenBundledModManifestEntry(manifest[staleName])) {
+      appendLog(`[zen-mod] Keeping user-owned ${staleName}; it was not installed by Zen.`);
+      continue;
+    }
     try {
       fs.unlinkSync(stalePath);
       appendLog(`[zen-mod] Removed ${staleName}${reason ? ` (${reason})` : ""}.`);
+      delete manifest[staleName];
     } catch (error) {
       appendLog(`[zen-mod] Could not remove ${staleName}: ${error?.message || String(error)}`);
     }
   }
+  writeInstanceManifest(minecraftRoot, manifest);
 }
 
 function getBundledZenBundleSpec(launchType, minecraftVersion) {
@@ -2916,6 +2946,11 @@ async function ensureZenClientMod(minecraftRoot, launchType, minecraftVersion) {
   ensureDir(modsDir);
   const targetName = String(bundleSpec.targetName || `zen-client-${selected}.jar`).trim() || `zen-client-${selected}.jar`;
   const target = path.join(modsDir, targetName);
+  const manifest = readInstanceManifest(minecraftRoot);
+  if (fs.existsSync(target) && !isZenBundledModManifestEntry(manifest[path.basename(target)])) {
+    appendLog(`[zen-mod] Keeping user-owned ${path.basename(target)}; Zen will not overwrite custom mod jars.`);
+    return;
+  }
 
   removeBundledZenClientMods(minecraftRoot, `replaced by ${targetName}`, targetName);
 
