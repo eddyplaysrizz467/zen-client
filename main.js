@@ -183,6 +183,10 @@ function isZenBundledModManifestEntry(entry) {
   return isZenManagedModManifestEntry(entry) && String(entry.slug || "").startsWith("zen-client-");
 }
 
+function isBaseSyncedModManifestEntry(entry) {
+  return isZenManagedModManifestEntry(entry) && entry.source === "base-mods-sync";
+}
+
 function isZenManagedModFile(minecraftRoot, fileName) {
   const manifest = readInstanceManifest(minecraftRoot);
   return isZenManagedModManifestEntry(manifest[fileName]);
@@ -267,6 +271,71 @@ function auditInstanceMods(minecraftRoot, selectedVersion, selectedLoader) {
   }
 
   return quarantined;
+}
+
+function syncBaseModsToInstance(baseMinecraftRoot, minecraftRoot, selectedVersion, selectedLoader) {
+  const baseRoot = path.resolve(String(baseMinecraftRoot || DEFAULT_ROOT));
+  const instanceRoot = path.resolve(String(minecraftRoot || baseRoot));
+  if (baseRoot.toLowerCase() === instanceRoot.toLowerCase()) return [];
+
+  const sourceModsDir = path.join(baseRoot, "mods");
+  if (!fs.existsSync(sourceModsDir)) return [];
+
+  const targetModsDir = path.join(instanceRoot, "mods");
+  ensureDir(targetModsDir);
+
+  const manifest = readInstanceManifest(instanceRoot);
+  const copied = [];
+  const skipped = [];
+
+  for (const entry of fs.readdirSync(sourceModsDir, { withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    if (!entry.name.toLowerCase().endsWith(".jar")) continue;
+    if (BUNDLED_ZEN_CLIENT_MOD_NAMES.includes(entry.name)) continue;
+
+    const sourcePath = path.join(sourceModsDir, entry.name);
+    const targetPath = path.join(targetModsDir, entry.name);
+    const sourceStat = fs.statSync(sourcePath);
+    const targetManifestEntry = manifest[entry.name];
+
+    if (fs.existsSync(targetPath) && !isBaseSyncedModManifestEntry(targetManifestEntry)) {
+      skipped.push({ name: entry.name, reason: "already exists in instance" });
+      continue;
+    }
+
+    const targetStat = fs.existsSync(targetPath) ? fs.statSync(targetPath) : null;
+    const needsCopy =
+      !targetStat ||
+      targetStat.size !== sourceStat.size ||
+      Math.abs(targetStat.mtimeMs - sourceStat.mtimeMs) > 1000;
+
+    if (!needsCopy) continue;
+
+    fs.copyFileSync(sourcePath, targetPath);
+    try {
+      fs.utimesSync(targetPath, sourceStat.atime, sourceStat.mtime);
+    } catch {
+      // Timestamp sync is nice for change detection, not required.
+    }
+
+    manifest[entry.name] = {
+      ...targetManifestEntry,
+      projectType: "mod",
+      loader: normalizeLoaderForModrinth(selectedLoader),
+      minecraftVersion: selectedVersion,
+      slug: "base-mods-sync",
+      source: "base-mods-sync",
+      sourcePath,
+      recordedAt: new Date().toISOString()
+    };
+    copied.push(entry.name);
+  }
+
+  if (copied.length) writeInstanceManifest(instanceRoot, manifest);
+  if (skipped.length) {
+    appendLog(`[mods] Skipped ${skipped.length} base mod sync item(s) because instance copies already exist.`);
+  }
+  return copied;
 }
 
 function ensureSafeVideoMode(minecraftRoot) {
@@ -971,10 +1040,15 @@ function initAutoUpdater() {
 function getLoaderLaunchExtras(selectedType, minecraftRoot) {
   const normalized = String(selectedType || "").trim().toLowerCase();
   const libraryRoot = path.join(minecraftRoot, "libraries");
+  const customArgs = [];
 
   if (normalized === "forge" || normalized === "neoforge") {
+    customArgs.push(`-DlibraryDirectory=${libraryRoot}`);
+    if (normalized === "neoforge") {
+      customArgs.push("--add-opens=java.base/java.lang.invoke=ALL-UNNAMED");
+    }
     return {
-      customArgs: [`-DlibraryDirectory=${libraryRoot}`],
+      customArgs,
       overrides: {
         libraryRoot,
         cwd: minecraftRoot
@@ -983,7 +1057,7 @@ function getLoaderLaunchExtras(selectedType, minecraftRoot) {
   }
 
   return {
-    customArgs: [],
+    customArgs,
     overrides: {
       cwd: minecraftRoot
     }
@@ -3117,6 +3191,11 @@ async function launchGame(settings) {
     appendLog("[launch] Applied safe video mode (windowed 1280x720) before startup.");
   }
 
+  const syncedMods = syncBaseModsToInstance(baseMinecraftRoot, minecraftRoot, selectedVersion, selectedType);
+  if (syncedMods.length) {
+    appendLog(`[mods] Synced ${syncedMods.length} mod(s) from your main mods folder into this ${selectedType} ${selectedVersion} instance.`);
+  }
+
   const quarantinedMods = auditInstanceMods(minecraftRoot, selectedVersion, selectedType);
   for (const item of quarantinedMods) {
     appendLog(`[mods] Disabled ${item.name} (${item.reason}) -> mods-disabled`);
@@ -3448,8 +3527,9 @@ ipcMain.handle("shell:openFolder", async (_event, payload) => {
 });
 
 ipcMain.handle("library:scanInstalled", async (_event, payload) => {
+  const baseRoot = payload?.minecraftDirectory || DEFAULT_ROOT;
   const root = resolveInstanceRoot(
-    payload?.minecraftDirectory || DEFAULT_ROOT,
+    baseRoot,
     payload?.launchType,
     payload?.minecraftVersion
   );
@@ -3458,6 +3538,10 @@ ipcMain.handle("library:scanInstalled", async (_event, payload) => {
 
   ensureDir(modsDir);
   ensureDir(packsDir);
+  const syncedMods = syncBaseModsToInstance(baseRoot, root, payload?.minecraftVersion, payload?.launchType);
+  if (syncedMods.length) {
+    appendLog(`[mods] Synced ${syncedMods.length} mod(s) into this ${payload?.launchType || "selected"} ${payload?.minecraftVersion || ""} instance.`);
+  }
 
   const readNames = (dir) =>
     fs
