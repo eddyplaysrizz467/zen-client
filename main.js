@@ -422,20 +422,26 @@ function recoverFromLaunchCrash(minecraftRoot, exitCode) {
   const hsErrNames = fs.readdirSync(minecraftRoot).filter((name) => /^hs_err_pid\d+\.log$/i.test(name));
   const newestHsErr = pickNewestFile(hsErrNames.map((name) => path.join(minecraftRoot, name)));
   const hsErr = readTextIfExists(newestHsErr);
-  const combined = `${latestLog}\n${hsErr}`;
+  const crashReportsDir = path.join(minecraftRoot, "crash-reports");
+  const crashReportNames = fs.existsSync(crashReportsDir)
+    ? fs.readdirSync(crashReportsDir).filter((name) => /^crash-.*\.txt$/i.test(name))
+    : [];
+  const newestCrashReport = pickNewestFile(crashReportNames.map((name) => path.join(crashReportsDir, name)));
+  const crashReport = readTextIfExists(newestCrashReport);
+  const combined = `${latestLog}\n${hsErr}\n${crashReport}`;
   if (!combined.trim()) return [];
 
   const modsDir = path.join(minecraftRoot, "mods");
   const recoveries = [];
   const seen = new Set();
 
-  const queueRecovery = (hint, reason) => {
+  const queueRecovery = (hint, reason, options = {}) => {
     const jar = findInstalledModJar(modsDir, hint);
     if (!jar) return;
     const key = jar.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
-    recoveries.push({ jar, reason });
+    recoveries.push({ jar, reason, ...options });
   };
 
   if (/Mod meteor-client added a lightmap caching hook/i.test(combined) && /badoptimizations/i.test(combined)) {
@@ -450,10 +456,16 @@ function recoverFromLaunchCrash(minecraftRoot, exitCode) {
   if (/streak-addon/i.test(combined) && recoveries.some((item) => item.jar.toLowerCase().includes("meteor"))) {
     queueRecovery("streak-addon", "depends on the removed meteor stack");
   }
+  if (
+    /kaptainwutax\.seedcrackerx/i.test(combined) &&
+    (/TrialChambersFinder/i.test(combined) || /FinderQueue/i.test(combined) || /field_1687.*null/i.test(combined))
+  ) {
+    queueRecovery("seedcracker", "crashed while scanning chunks after the world unloaded", { force: true });
+  }
 
   const moved = [];
   for (const item of recoveries.slice(0, 2)) {
-    if (!isZenManagedModFile(minecraftRoot, item.jar)) continue;
+    if (!item.force && !isZenManagedModFile(minecraftRoot, item.jar)) continue;
     const result = moveModToDisabled(minecraftRoot, item.jar, item.reason);
     if (result) moved.push(result);
   }
@@ -3201,6 +3213,11 @@ async function launchGame(settings) {
     appendLog(`[mods] Disabled ${item.name} (${item.reason}) -> mods-disabled`);
   }
 
+  const previousCrashRecoveries = recoverFromLaunchCrash(minecraftRoot, 1);
+  for (const item of previousCrashRecoveries) {
+    appendLog(`[mods] Disabled ${item.name} from a previous launch issue (${item.reason}) -> mods-disabled`);
+  }
+
   await ensureZenClientDependencies(minecraftRoot, selectedVersion, selectedType);
   await ensureZenClientMod(minecraftRoot, selectedType, selectedVersion);
   // Auto-install requested performance mods for Fabric/Quilt.
@@ -3232,7 +3249,7 @@ async function launchGame(settings) {
     appendLog(`[launch] Minecraft closed with exit code ${code}`);
     const recovered = recoverFromLaunchCrash(currentLaunchContext?.minecraftRoot, code);
     for (const item of recovered) {
-      appendLog(`[mods] Removed ${item.name} due to a launch issue (${item.reason}). Please relaunch.`);
+      appendLog(`[mods] Disabled ${item.name} due to a launch issue (${item.reason}). Please relaunch.`);
     }
     sendEvent("launcher-closed", { code });
     currentLaunchContext = null;
