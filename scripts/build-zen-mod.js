@@ -5,6 +5,8 @@ const { spawnSync } = require("child_process");
 const root = path.resolve(__dirname, "..");
 const modDir = path.join(root, "zen-client-mod");
 const libsDir = path.join(modDir, "build", "libs");
+const neoModDir = path.join(root, "zen-client-neoforge-mod");
+const neoLibsDir = path.join(neoModDir, "build", "libs");
 const bundledDir = path.join(root, "bundled-mods");
 const loaderBundleDir = path.join(root, "zen-client-loader-mods");
 const gradlePropsPath = path.join(modDir, "gradle.properties");
@@ -22,16 +24,19 @@ function readGradleProperty(name) {
   return match ? String(match[1]).trim() : "";
 }
 
-function runBuild(properties = {}) {
+function runBuild(properties = {}, projectDir = modDir) {
   const command = process.platform === "win32" ? "cmd.exe" : "sh";
+  const gradleCommand = process.platform === "win32" ? path.join(modDir, "gradlew.bat") : path.join(modDir, "gradlew");
   const buildArgs = [
     "clean",
     "build",
     ...Object.entries(properties).map(([name, value]) => `-P${name}=${value}`)
   ];
-  const args = process.platform === "win32" ? ["/c", "gradlew.bat", ...buildArgs] : ["./gradlew", ...buildArgs];
+  const args = process.platform === "win32"
+    ? ["/c", gradleCommand, "-p", projectDir, ...buildArgs]
+    : [gradleCommand, "-p", projectDir, ...buildArgs];
   const result = spawnSync(command, args, {
-    cwd: modDir,
+    cwd: root,
     stdio: "inherit",
     env: process.env
   });
@@ -41,18 +46,18 @@ function runBuild(properties = {}) {
   }
 }
 
-function pickJar() {
-  const files = fs.readdirSync(libsDir)
+function pickJar(directory = libsDir) {
+  const files = fs.readdirSync(directory)
     .filter((file) => file.endsWith(".jar"))
     .filter((file) => !file.endsWith("-sources.jar"))
     .filter((file) => !file.endsWith("-dev.jar"))
     .sort();
 
   if (!files.length) {
-    throw new Error("No built Zen Client mod jar was found.");
+    throw new Error(`No built Zen Client mod jar was found in ${directory}.`);
   }
 
-  return path.join(libsDir, files[0]);
+  return path.join(directory, files[0]);
 }
 
 function readJsonIfPresent(filePath) {
@@ -129,6 +134,16 @@ const builtTargets = buildTargets.map((target) => {
   };
 });
 
+runBuild({}, neoModDir);
+const neoSourceJar = pickJar(neoLibsDir);
+const neoTarget = {
+  key: "neoforge-1.21",
+  minecraftVersion: ZEN_SETTINGS_MIN_MINECRAFT_VERSION,
+  minecraftVersionRange: `>=${ZEN_SETTINGS_MIN_MINECRAFT_VERSION}`,
+  sourceJar: neoSourceJar,
+  sourceJarName: path.basename(neoSourceJar)
+};
+
 const bundles = builtTargets.flatMap((target) => [
   {
     loader: "fabric",
@@ -151,6 +166,17 @@ const bundles = builtTargets.flatMap((target) => [
   }
 ]);
 
+bundles.push({
+  loader: "neoforge",
+  minecraftVersion: neoTarget.minecraftVersion,
+  minecraftVersionRange: neoTarget.minecraftVersionRange,
+  file: `zen-client-neoforge-${neoTarget.minecraftVersion}.jar`,
+  targetName: "zen-client-neoforge.jar",
+  requiredMods: [],
+  sourcePath: neoTarget.sourceJar,
+  notes: "Native NeoForge Zen Client mod bundle built against Minecraft 1.21.1."
+});
+
 for (const bundle of inferLoaderBundleSpecs()) {
   const existingIndex = bundles.findIndex((item) =>
     item.loader === bundle.loader &&
@@ -163,7 +189,8 @@ for (const bundle of inferLoaderBundleSpecs()) {
 
 for (const bundle of bundles) {
   const target = path.join(bundledDir, bundle.file);
-  const bundleSource = bundle.sourcePath || sourceJar;
+  const bundleSource = bundle.sourcePath;
+  if (!bundleSource) throw new Error(`Bundle ${bundle.file} is missing a sourcePath.`);
   fs.copyFileSync(bundleSource, target);
   console.log(`[zen-mod] bundled ${path.basename(bundleSource)} -> ${target}`);
 
@@ -181,7 +208,11 @@ fs.writeFileSync(
         key: target.key,
         minecraftVersion: target.minecraftVersion,
         file: target.sourceJarName
-      })),
+      })).concat({
+        key: neoTarget.key,
+        minecraftVersion: neoTarget.minecraftVersion,
+        file: neoTarget.sourceJarName
+      }),
       bundles: bundles.map(({ sourcePath, ...bundle }) => bundle)
     },
     null,

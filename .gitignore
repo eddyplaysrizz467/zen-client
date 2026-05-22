@@ -16,6 +16,10 @@ release/
 bundled-mods/
 zen-client-mod/.gradle/
 zen-client-mod/build/
+zen-client-neoforge-mod/.gradle/
+zen-client-neoforge-mod/build/
+zen-client-neoforge-mod/runs/
+zen-client-neoforge-mod/src/generated/
 
 # OS/editor
 .DS_Store

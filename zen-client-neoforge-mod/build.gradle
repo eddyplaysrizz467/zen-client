@@ -1,0 +1,62 @@
+plugins {
+  id "java-library"
+  id "net.neoforged.gradle.userdev" version "7.1.27"
+}
+
+version = mod_version
+group = mod_group_id
+
+base {
+  archivesName = "zen-client-neoforge"
+}
+
+repositories {
+  mavenCentral()
+}
+
+sourceSets {
+  main {
+    java {
+      srcDir "src/generated/java"
+    }
+  }
+}
+
+tasks.register("generateNeoForgeSources", Exec) {
+  workingDir rootProject.projectDir.parentFile
+  commandLine "node", "scripts/generate-neoforge-mod.js"
+}
+
+tasks.named("compileJava").configure {
+  dependsOn tasks.named("generateNeoForgeSources")
+}
+
+dependencies {
+  implementation "net.neoforged:neoforge:${neo_version}"
+}
+
+tasks.withType(ProcessResources).configureEach {
+  def replaceProperties = [
+    minecraft_version: minecraft_version,
+    minecraft_version_range: minecraft_version_range,
+    neo_version: neo_version,
+    neo_version_range: neo_version_range,
+    loader_version_range: loader_version_range,
+    mod_id: mod_id,
+    mod_name: mod_name,
+    mod_license: mod_license,
+    mod_version: mod_version
+  ]
+  inputs.properties replaceProperties
+  filesMatching(["META-INF/neoforge.mods.toml"]) {
+    expand replaceProperties
+  }
+}
+
+java {
+  toolchain.languageVersion = JavaLanguageVersion.of(21)
+}
+
+tasks.withType(JavaCompile).configureEach {
+  options.encoding = "UTF-8"
+}
