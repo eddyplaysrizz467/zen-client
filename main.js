@@ -29,6 +29,7 @@ const ZEN_CLIENT_BUNDLE_MANIFEST_FILENAME = "zen-client-bundles.json";
 const ZEN_CLIENT_MOD_FILENAME = "zen-client-fabric.jar";
 const ZEN_CLIENT_MOD_FILENAME_TEMPLATE = "zen-client-fabric-%VERSION%.jar";
 const ZEN_SETTINGS_MIN_MINECRAFT_VERSION = "1.21.1";
+const BASE_MOD_SYNC_MIN_MINECRAFT_VERSION = "1.21.11";
 const ZEN_SETTINGS_RELEASE_SERIES = [
   "1.21.11",
   "1.21.10",
@@ -205,6 +206,11 @@ function isZenManagedModFile(minecraftRoot, fileName) {
   return isZenManagedModManifestEntry(manifest[fileName]);
 }
 
+function shouldSyncBaseModsToInstance(selectedVersion) {
+  const version = String(selectedVersion || "").trim();
+  return isModernMinecraftRelease(version) && compareMcVersions(version, BASE_MOD_SYNC_MIN_MINECRAFT_VERSION) >= 0;
+}
+
 function parseMinecraftVersionHints(fileName) {
   const matches = String(fileName || "").match(/1\.\d+(?:\.\d+)?/g);
   return Array.from(new Set(matches || []));
@@ -287,6 +293,8 @@ function auditInstanceMods(minecraftRoot, selectedVersion, selectedLoader) {
 }
 
 function syncBaseModsToInstance(baseMinecraftRoot, minecraftRoot, selectedVersion, selectedLoader) {
+  if (!shouldSyncBaseModsToInstance(selectedVersion)) return [];
+
   const baseRoot = path.resolve(String(baseMinecraftRoot || DEFAULT_ROOT));
   const instanceRoot = path.resolve(String(minecraftRoot || baseRoot));
   if (baseRoot.toLowerCase() === instanceRoot.toLowerCase()) return [];
@@ -3067,6 +3075,10 @@ async function modrinthPickDownload(slug, minecraftVersion, launchType) {
 async function ensureModrinthMods(minecraftRoot, minecraftVersion, launchType) {
   const selected = normalizeLoaderForModrinth(launchType);
   if (selected !== "fabric" && selected !== "quilt" && selected !== "neoforge") return;
+  if (!shouldSyncBaseModsToInstance(minecraftVersion)) {
+    appendLog(`[mods] Skipping automatic performance mods for ${selected} ${minecraftVersion}; lower version folders only receive the Zen Client mod.`);
+    return;
+  }
   if (selected === "quilt") {
     appendLog("[mods] Skipping automatic performance mod pack for Quilt to avoid loader compatibility issues.");
     return;
