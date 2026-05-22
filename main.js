@@ -291,7 +291,7 @@ function syncBaseModsToInstance(baseMinecraftRoot, minecraftRoot, selectedVersio
   for (const entry of fs.readdirSync(sourceModsDir, { withFileTypes: true })) {
     if (!entry.isFile()) continue;
     if (!entry.name.toLowerCase().endsWith(".jar")) continue;
-    if (BUNDLED_ZEN_CLIENT_MOD_NAMES.includes(entry.name)) continue;
+    if (BUNDLED_ZEN_CLIENT_MOD_NAMES.has(entry.name)) continue;
 
     const sourcePath = path.join(sourceModsDir, entry.name);
     const targetPath = path.join(targetModsDir, entry.name);
