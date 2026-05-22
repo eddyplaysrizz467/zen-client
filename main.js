@@ -29,6 +29,19 @@ const ZEN_CLIENT_BUNDLE_MANIFEST_FILENAME = "zen-client-bundles.json";
 const ZEN_CLIENT_MOD_FILENAME = "zen-client-fabric.jar";
 const ZEN_CLIENT_MOD_FILENAME_TEMPLATE = "zen-client-fabric-%VERSION%.jar";
 const ZEN_SETTINGS_MIN_MINECRAFT_VERSION = "1.21.1";
+const ZEN_SETTINGS_RELEASE_SERIES = [
+  "1.21.11",
+  "1.21.10",
+  "1.21.9",
+  "1.21.8",
+  "1.21.7",
+  "1.21.6",
+  "1.21.5",
+  "1.21.4",
+  "1.21.3",
+  "1.21.2",
+  "1.21.1"
+];
 const BUNDLED_ZEN_CLIENT_MOD_NAMES = new Set([
   "zen-client-fabric.jar",
   "zen-client-quilt.jar",
@@ -1260,6 +1273,19 @@ function getBundledZenBundleSourcePath(bundleSpec) {
     path.join(__dirname, "bundled-mods", bundleSpec.file)
   ].filter(Boolean);
   return pickNewestFile(candidates);
+}
+
+function getZenAutoInstallVersions(selectedVersion) {
+  const selected = String(selectedVersion || "").trim();
+  const versions = selected ? [selected] : [];
+  if (isModernMinecraftRelease(selected) && selected.startsWith("1.") && compareMcVersions(selected, ZEN_SETTINGS_MIN_MINECRAFT_VERSION) >= 0) {
+    for (const version of ZEN_SETTINGS_RELEASE_SERIES) {
+      if (compareMcVersions(version, ZEN_SETTINGS_MIN_MINECRAFT_VERSION) >= 0 && compareMcVersions(version, selected) <= 0) {
+        versions.push(version);
+      }
+    }
+  }
+  return uniqueList(versions);
 }
 
 function sanitizeAccount(account) {
@@ -3000,6 +3026,17 @@ const MODRINTH_EXTRA_MODS = [
   { slug: "dynamic-fps", label: "Dynamic FPS (background FPS limiter)" }
 ];
 
+const MODRINTH_NEOFORGE_MODS = [
+  { slug: "sodium", label: "Sodium" },
+  { slug: "lithium", label: "Lithium" },
+  { slug: "entityculling", label: "Entity Culling" },
+  { slug: "ferrite-core", label: "FerriteCore" },
+  { slug: "immediatelyfast", label: "ImmediatelyFast" },
+  { slug: "modernfix", label: "ModernFix" },
+  { slug: "cloth-config", label: "Cloth Config API" },
+  { slug: "dynamic-fps", label: "Dynamic FPS (background FPS limiter)" }
+];
+
 async function modrinthFetchProjectVersion(slug, minecraftVersion, loader) {
   const encodedGameVersions = encodeURIComponent(JSON.stringify([minecraftVersion]));
   const encodedLoaders = encodeURIComponent(JSON.stringify([loader]));
@@ -3009,9 +3046,18 @@ async function modrinthFetchProjectVersion(slug, minecraftVersion, loader) {
 }
 
 async function modrinthPickDownload(slug, minecraftVersion, launchType) {
-  const preferQuilt = String(launchType || "").toLowerCase() === "quilt";
-  const first = preferQuilt ? await modrinthFetchProjectVersion(slug, minecraftVersion, "quilt") : null;
-  const version = first || (await modrinthFetchProjectVersion(slug, minecraftVersion, "fabric"));
+  const selected = normalizeLoaderForModrinth(launchType);
+  const loaderOrder =
+    selected === "quilt"
+      ? ["quilt", "fabric"]
+      : selected
+        ? [selected]
+        : ["fabric"];
+  let version = null;
+  for (const loader of loaderOrder) {
+    version = await modrinthFetchProjectVersion(slug, minecraftVersion, loader);
+    if (version) break;
+  }
   const files = Array.isArray(version?.files) ? version.files : [];
   const primary = files.find((f) => f?.primary) || files[0];
   if (!primary?.url) return null;
@@ -3019,8 +3065,8 @@ async function modrinthPickDownload(slug, minecraftVersion, launchType) {
 }
 
 async function ensureModrinthMods(minecraftRoot, minecraftVersion, launchType) {
-  const selected = String(launchType || "").toLowerCase();
-  if (selected !== "fabric" && selected !== "quilt") return;
+  const selected = normalizeLoaderForModrinth(launchType);
+  if (selected !== "fabric" && selected !== "quilt" && selected !== "neoforge") return;
   if (selected === "quilt") {
     appendLog("[mods] Skipping automatic performance mod pack for Quilt to avoid loader compatibility issues.");
     return;
@@ -3029,7 +3075,7 @@ async function ensureModrinthMods(minecraftRoot, minecraftVersion, launchType) {
   const modsDir = path.join(minecraftRoot, "mods");
   ensureDir(modsDir);
 
-  const wanted = [...MODRINTH_BASE_MODS, ...MODRINTH_EXTRA_MODS];
+  const wanted = selected === "neoforge" ? MODRINTH_NEOFORGE_MODS : [...MODRINTH_BASE_MODS, ...MODRINTH_EXTRA_MODS];
   for (const mod of wanted) {
     const slug = mod.slug;
     const label = mod.label || slug;
@@ -3166,6 +3212,19 @@ async function ensureZenClientMod(minecraftRoot, launchType, minecraftVersion) {
   appendLog(`[zen-mod] Installed bundled Zen Client mod for ${selected} -> ${path.basename(target)}`);
 }
 
+async function ensureZenClientModForVersionFolders(baseMinecraftRoot, launchType, selectedVersion) {
+  const selected = normalizeZenModLoader(launchType);
+  if (selected !== "fabric" && selected !== "quilt" && selected !== "neoforge") return;
+
+  const baseRoot = String(baseMinecraftRoot || DEFAULT_ROOT).trim() || DEFAULT_ROOT;
+  const versions = getZenAutoInstallVersions(selectedVersion);
+  for (const version of versions) {
+    const instanceRoot = resolveInstanceRoot(baseRoot, selected, version);
+    ensureDir(instanceRoot);
+    await ensureZenClientMod(instanceRoot, selected, version);
+  }
+}
+
 async function launchGame(settings) {
   const state = loadState();
   const account = state.accounts.find((item) => item.id === state.selectedAccountId);
@@ -3218,9 +3277,10 @@ async function launchGame(settings) {
     appendLog(`[mods] Disabled ${item.name} from a previous launch issue (${item.reason}) -> mods-disabled`);
   }
 
+  await ensureZenClientModForVersionFolders(baseMinecraftRoot, selectedType, selectedVersion);
   await ensureZenClientDependencies(minecraftRoot, selectedVersion, selectedType);
   await ensureZenClientMod(minecraftRoot, selectedType, selectedVersion);
-  // Auto-install requested performance mods for Fabric/Quilt.
+  // Auto-install requested performance mods for loader/version pairs that Modrinth supports.
   await ensureModrinthMods(minecraftRoot, selectedVersion, selectedType);
 
   updateState((draft) => {
@@ -3536,6 +3596,9 @@ ipcMain.handle("shell:openFolder", async (_event, payload) => {
   const folderName = kind === "resourcepacks" ? "resourcepacks" : "mods";
   const targetDir = path.join(root, folderName);
   ensureDir(targetDir);
+  if (folderName === "mods") {
+    await ensureZenClientMod(root, payload?.launchType, payload?.minecraftVersion);
+  }
   const result = await shell.openPath(targetDir);
   if (result) {
     throw new Error(result);
@@ -3559,6 +3622,7 @@ ipcMain.handle("library:scanInstalled", async (_event, payload) => {
   if (syncedMods.length) {
     appendLog(`[mods] Synced ${syncedMods.length} mod(s) into this ${payload?.launchType || "selected"} ${payload?.minecraftVersion || ""} instance.`);
   }
+  await ensureZenClientModForVersionFolders(baseRoot, payload?.launchType, payload?.minecraftVersion);
 
   const readNames = (dir) =>
     fs
@@ -3630,7 +3694,7 @@ ipcMain.handle("modrinth:install", async (_event, payload) => {
 
   const loader = normalizeLoaderForModrinth(launchType);
   if (projectType === "mod" && !loader) {
-    throw new Error("Switch Launch type to Fabric or Quilt to install mods.");
+    throw new Error("Switch Launch type to Fabric, Quilt, Forge, or NeoForge to install mods.");
   }
 
   if (projectType === "mod" && !minecraftVersion) {
