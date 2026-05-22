@@ -10,6 +10,10 @@ const loaderBundleDir = path.join(root, "zen-client-loader-mods");
 const gradlePropsPath = path.join(modDir, "gradle.properties");
 const bundleManifestPath = path.join(bundledDir, "zen-client-bundles.json");
 const SUPPORTED_LOADERS = new Set(["fabric", "quilt", "forge", "neoforge"]);
+const ZEN_SETTINGS_MIN_MINECRAFT_VERSION = "1.21.1";
+const ZEN_SETTINGS_CURRENT_MINECRAFT_VERSION = "1.21.11";
+const ZEN_SETTINGS_LEGACY_FABRIC_API_VERSION = "0.116.12+1.21.1";
+const ZEN_SETTINGS_LEGACY_LOADER_VERSION = "0.16.14";
 
 function readGradleProperty(name) {
   if (!fs.existsSync(gradlePropsPath)) return "";
@@ -18,9 +22,14 @@ function readGradleProperty(name) {
   return match ? String(match[1]).trim() : "";
 }
 
-function runBuild() {
+function runBuild(properties = {}) {
   const command = process.platform === "win32" ? "cmd.exe" : "sh";
-  const args = process.platform === "win32" ? ["/c", "gradlew.bat", "build"] : ["./gradlew", "build"];
+  const buildArgs = [
+    "clean",
+    "build",
+    ...Object.entries(properties).map(([name, value]) => `-P${name}=${value}`)
+  ];
+  const args = process.platform === "win32" ? ["/c", "gradlew.bat", ...buildArgs] : ["./gradlew", ...buildArgs];
   const result = spawnSync(command, args, {
     cwd: modDir,
     stdio: "inherit",
@@ -89,30 +98,58 @@ function inferLoaderBundleSpecs() {
   return specs;
 }
 
-runBuild();
 fs.mkdirSync(bundledDir, { recursive: true });
-const sourceJar = pickJar();
-const minecraftVersion = readGradleProperty("minecraft_version");
+const minecraftVersion = readGradleProperty("minecraft_version") || ZEN_SETTINGS_CURRENT_MINECRAFT_VERSION;
+const buildTargets = [
+  {
+    key: "current",
+    minecraftVersion,
+    minecraftVersionRange: `>=${ZEN_SETTINGS_CURRENT_MINECRAFT_VERSION}`,
+    properties: {}
+  },
+  {
+    key: "legacy-1.21",
+    minecraftVersion: ZEN_SETTINGS_MIN_MINECRAFT_VERSION,
+    minecraftVersionRange: `>=${ZEN_SETTINGS_MIN_MINECRAFT_VERSION} <${ZEN_SETTINGS_CURRENT_MINECRAFT_VERSION}`,
+    properties: {
+      minecraft_version: ZEN_SETTINGS_MIN_MINECRAFT_VERSION,
+      fabric_api_version: ZEN_SETTINGS_LEGACY_FABRIC_API_VERSION,
+      loader_version: ZEN_SETTINGS_LEGACY_LOADER_VERSION
+    }
+  }
+];
 
-const bundles = [
+const builtTargets = buildTargets.map((target) => {
+  runBuild(target.properties);
+  const sourceJar = pickJar();
+  return {
+    ...target,
+    sourceJar,
+    sourceJarName: path.basename(sourceJar)
+  };
+});
+
+const bundles = builtTargets.flatMap((target) => [
   {
     loader: "fabric",
-    minecraftVersion: minecraftVersion || "",
-    minecraftVersionRange: ">=1.21",
-    file: minecraftVersion ? `zen-client-fabric-${minecraftVersion}.jar` : "zen-client-fabric.jar",
+    minecraftVersion: target.minecraftVersion,
+    minecraftVersionRange: target.minecraftVersionRange,
+    file: `zen-client-fabric-${target.minecraftVersion}.jar`,
     targetName: "zen-client-fabric.jar",
-    requiredMods: ["fabric-api"]
+    requiredMods: ["fabric-api"],
+    sourcePath: target.sourceJar
   },
   {
     loader: "quilt",
-    minecraftVersion: minecraftVersion || "",
-    minecraftVersionRange: ">=1.21",
-    file: minecraftVersion ? `zen-client-quilt-${minecraftVersion}.jar` : "zen-client-quilt.jar",
+    minecraftVersion: target.minecraftVersion,
+    minecraftVersionRange: target.minecraftVersionRange,
+    file: `zen-client-quilt-${target.minecraftVersion}.jar`,
     targetName: "zen-client-quilt.jar",
     requiredMods: ["fabric-api"],
-    notes: "Uses the Fabric-compatible Zen mod bundle on Quilt."
+    notes: "Uses the Fabric-compatible Zen mod bundle on Quilt.",
+    sourcePath: target.sourceJar
   }
-];
+]);
 
 for (const bundle of inferLoaderBundleSpecs()) {
   const existingIndex = bundles.findIndex((item) =>
@@ -140,7 +177,11 @@ fs.writeFileSync(
   `${JSON.stringify(
     {
       generatedAt: new Date().toISOString(),
-      sourceJar: path.basename(sourceJar),
+      sourceJars: builtTargets.map((target) => ({
+        key: target.key,
+        minecraftVersion: target.minecraftVersion,
+        file: target.sourceJarName
+      })),
       bundles: bundles.map(({ sourcePath, ...bundle }) => bundle)
     },
     null,

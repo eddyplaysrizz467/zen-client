@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld("aeroApi", {
   getState: () => invoke("state:get"),
   getVersions: () => invoke("versions:get"),
   saveSettings: (settings) => invoke("settings:save", settings),
+  confirmUnsupportedZenSettings: (payload) => invoke("launch:confirmUnsupportedZenSettings", payload),
   addOfflineAccount: (payload) => invoke("account:addOffline", payload),
   removeAccount: (accountId) => invoke("account:remove", accountId),
   selectAccount: (accountId) => invoke("account:select", accountId),

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, nativeImage, Menu, shell, screen: electronScreen } = require("electron");
+const { app, BrowserWindow, ipcMain, nativeImage, Menu, shell, screen: electronScreen, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -28,6 +28,7 @@ const DEFAULT_DISCORD_APP_ID = "1496668054803714058";
 const ZEN_CLIENT_BUNDLE_MANIFEST_FILENAME = "zen-client-bundles.json";
 const ZEN_CLIENT_MOD_FILENAME = "zen-client-fabric.jar";
 const ZEN_CLIENT_MOD_FILENAME_TEMPLATE = "zen-client-fabric-%VERSION%.jar";
+const ZEN_SETTINGS_MIN_MINECRAFT_VERSION = "1.21.1";
 const BUNDLED_ZEN_CLIENT_MOD_NAMES = new Set([
   "zen-client-fabric.jar",
   "zen-client-quilt.jar",
@@ -1072,12 +1073,12 @@ function versionMatchesSimpleRange(version, rangeText) {
 function isZenClientModSupportedMinecraftVersion(minecraftVersion) {
   const value = String(minecraftVersion || "").trim();
   if (!value) return false;
-  if (isModernMinecraftRelease(value)) return value.startsWith("1.") && compareMcVersions(value, "1.21") >= 0;
+  if (isModernMinecraftRelease(value)) return value.startsWith("1.") && compareMcVersions(value, ZEN_SETTINGS_MIN_MINECRAFT_VERSION) >= 0;
 
   const namedSnapshot = value.match(/^(\d+\.\d+(?:\.\d+)?)-(snapshot|pre|rc)-?\d+$/i);
   if (namedSnapshot) {
     const baseVersion = namedSnapshot[1];
-    if (baseVersion.startsWith("1.")) return compareMcVersions(baseVersion, "1.21") >= 0;
+    if (baseVersion.startsWith("1.")) return compareMcVersions(baseVersion, ZEN_SETTINGS_MIN_MINECRAFT_VERSION) >= 0;
     return false;
   }
 
@@ -1128,18 +1129,6 @@ function getBundledZenBundleSpec(launchType, minecraftVersion) {
       };
     }
 
-    const loaderOnly = manifest.bundles.find((bundle) =>
-      String(bundle.loader || "").toLowerCase() === loader &&
-      !String(bundle.minecraftVersion || "").trim()
-    );
-    if (loaderOnly) {
-      return {
-        ...loaderOnly,
-        loader,
-        minecraftVersion: version
-      };
-    }
-
     const ranged = manifest.bundles.find((bundle) =>
       String(bundle.loader || "").toLowerCase() === loader &&
       versionMatchesSimpleRange(version, bundle.minecraftVersionRange)
@@ -1147,6 +1136,18 @@ function getBundledZenBundleSpec(launchType, minecraftVersion) {
     if (ranged) {
       return {
         ...ranged,
+        loader,
+        minecraftVersion: version
+      };
+    }
+
+    const loaderOnly = manifest.bundles.find((bundle) =>
+      String(bundle.loader || "").toLowerCase() === loader &&
+      !String(bundle.minecraftVersion || "").trim()
+    );
+    if (loaderOnly) {
+      return {
+        ...loaderOnly,
         loader,
         minecraftVersion: version
       };
@@ -2412,6 +2413,15 @@ async function ensureFile(url, targetPath) {
   return targetPath;
 }
 
+async function downloadFile(url, targetPath) {
+  ensureDir(path.dirname(targetPath));
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Failed to download ${url}`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  fs.writeFileSync(targetPath, buffer);
+  return targetPath;
+}
+
 function getVersionInstallInfo(minecraftRoot, versionId) {
   const versionDir = path.join(minecraftRoot, "versions", versionId);
   const jsonPath = path.join(versionDir, `${versionId}.json`);
@@ -2428,6 +2438,64 @@ function getVersionInstallInfo(minecraftRoot, versionId) {
     jarSize,
     isValid: jsonExists && jarExists && jarSize > 0
   };
+}
+
+async function ensureMojangClientVersion(minecraftRoot, minecraftVersion) {
+  const version = String(minecraftVersion || "").trim();
+  if (!version || !isModernMinecraftRelease(version)) return false;
+
+  const existing = getVersionInstallInfo(minecraftRoot, version);
+  if (existing.isValid) return true;
+
+  const manifest = await fetchJsonCached(
+    "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json",
+    "versions-mojang",
+    30 * 60 * 1000
+  );
+  const entry = Array.isArray(manifest?.versions) ? manifest.versions.find((item) => item?.id === version) : null;
+  if (!entry?.url) return false;
+
+  const versionJson = await fetchJsonCached(entry.url, `mojang-version-${version}`, 24 * 60 * 60 * 1000);
+  ensureDir(existing.versionDir);
+  fs.writeFileSync(existing.jsonPath, JSON.stringify(versionJson, null, 2), "utf8");
+
+  const clientUrl = String(versionJson?.downloads?.client?.url || "").trim();
+  if (clientUrl) {
+    await downloadFile(clientUrl, existing.jarPath);
+  }
+
+  return getVersionInstallInfo(minecraftRoot, version).isValid;
+}
+
+async function ensureVersionLibraries(minecraftRoot, versionId, label) {
+  const info = getVersionInstallInfo(minecraftRoot, versionId);
+  if (!info.jsonExists) return 0;
+
+  let versionJson = null;
+  try {
+    versionJson = JSON.parse(fs.readFileSync(info.jsonPath, "utf8"));
+  } catch {
+    return 0;
+  }
+
+  let repaired = 0;
+  for (const library of Array.isArray(versionJson?.libraries) ? versionJson.libraries : []) {
+    const artifact = library?.downloads?.artifact;
+    const artifactPath = String(artifact?.path || "").trim();
+    const artifactUrl = String(artifact?.url || "").trim();
+    if (!artifactPath || !artifactUrl) continue;
+
+    const target = path.join(minecraftRoot, "libraries", artifactPath);
+    const expectedSize = Number(artifact?.size || 0);
+    const actualSize = fs.existsSync(target) ? fs.statSync(target).size : 0;
+    if (actualSize > 0 && (!expectedSize || actualSize === expectedSize)) continue;
+
+    await downloadFile(artifactUrl, target);
+    repaired += 1;
+  }
+
+  if (repaired) appendLog(`[${label}] Repaired ${repaired} missing or incomplete libraries for ${versionId}.`);
+  return repaired;
 }
 
 function repairInheritedVersionJar(minecraftRoot, versionId) {
@@ -2708,19 +2776,32 @@ async function ensureQuiltInstall(minecraftRoot, javaPath, minecraftVersion) {
 }
 
 async function ensureForgeInstall(minecraftRoot, javaPath, minecraftVersion) {
+  await ensureMojangClientVersion(minecraftRoot, minecraftVersion).catch((error) => {
+    appendLog(`[forge] Could not prefetch vanilla ${minecraftVersion}: ${error?.message || String(error)}`);
+  });
+
   const existingCandidate = findInstalledVersionCandidate(
     minecraftRoot,
     "forge-",
     (name) => name.includes(minecraftVersion)
   );
-  if (existingCandidate) return existingCandidate;
+  if (existingCandidate) {
+    await ensureVersionLibraries(minecraftRoot, existingCandidate, "forge");
+    return existingCandidate;
+  }
 
   const loaderVersion = await getLatestForgeLoader(minecraftVersion);
   if (!loaderVersion) throw new Error("Could not find a Forge loader for that version.");
   const versionId = `forge-${loaderVersion}`;
   let installInfo = getVersionInstallInfo(minecraftRoot, versionId);
-  if (installInfo.isValid) return versionId;
-  if (repairInheritedVersionJar(minecraftRoot, versionId)) return versionId;
+  if (installInfo.isValid) {
+    await ensureVersionLibraries(minecraftRoot, versionId, "forge");
+    return versionId;
+  }
+  if (repairInheritedVersionJar(minecraftRoot, versionId)) {
+    await ensureVersionLibraries(minecraftRoot, versionId, "forge");
+    return versionId;
+  }
   if (installInfo.jsonExists || installInfo.jarExists) {
     removeBrokenVersionInstall(minecraftRoot, versionId, "forge");
   }
@@ -2735,7 +2816,10 @@ async function ensureForgeInstall(minecraftRoot, javaPath, minecraftVersion) {
   if (repairInheritedVersionJar(minecraftRoot, versionId)) {
     installInfo = getVersionInstallInfo(minecraftRoot, versionId);
   }
-  if (installInfo.isValid) return versionId;
+  if (installInfo.isValid) {
+    await ensureVersionLibraries(minecraftRoot, versionId, "forge");
+    return versionId;
+  }
 
   const fallback = findInstalledVersionCandidate(
     minecraftRoot,
@@ -2744,6 +2828,7 @@ async function ensureForgeInstall(minecraftRoot, javaPath, minecraftVersion) {
   );
   if (fallback) {
     appendLog(`[forge] Using installed version ${fallback} (expected ${versionId})`);
+    await ensureVersionLibraries(minecraftRoot, fallback, "forge");
     return fallback;
   }
 
@@ -2751,19 +2836,32 @@ async function ensureForgeInstall(minecraftRoot, javaPath, minecraftVersion) {
 }
 
 async function ensureNeoForgeInstall(minecraftRoot, javaPath, minecraftVersion) {
+  await ensureMojangClientVersion(minecraftRoot, minecraftVersion).catch((error) => {
+    appendLog(`[neoforge] Could not prefetch vanilla ${minecraftVersion}: ${error?.message || String(error)}`);
+  });
+
   const existingCandidate = findInstalledVersionCandidate(
     minecraftRoot,
     "neoforge-",
     (name) => neoforgeLoaderToMinecraftVersion(name.replace(/^neoforge-/, "")) === minecraftVersion
   );
-  if (existingCandidate) return existingCandidate;
+  if (existingCandidate) {
+    await ensureVersionLibraries(minecraftRoot, existingCandidate, "neoforge");
+    return existingCandidate;
+  }
 
   const loaderVersion = await getLatestNeoForgeLoader(minecraftVersion);
   if (!loaderVersion) throw new Error("Could not find a NeoForge loader for that version.");
   const versionId = `neoforge-${loaderVersion}`;
   let installInfo = getVersionInstallInfo(minecraftRoot, versionId);
-  if (installInfo.isValid) return versionId;
-  if (repairInheritedVersionJar(minecraftRoot, versionId)) return versionId;
+  if (installInfo.isValid) {
+    await ensureVersionLibraries(minecraftRoot, versionId, "neoforge");
+    return versionId;
+  }
+  if (repairInheritedVersionJar(minecraftRoot, versionId)) {
+    await ensureVersionLibraries(minecraftRoot, versionId, "neoforge");
+    return versionId;
+  }
   if (installInfo.jsonExists || installInfo.jarExists) {
     removeBrokenVersionInstall(minecraftRoot, versionId, "neoforge");
   }
@@ -2778,7 +2876,10 @@ async function ensureNeoForgeInstall(minecraftRoot, javaPath, minecraftVersion) 
   if (repairInheritedVersionJar(minecraftRoot, versionId)) {
     installInfo = getVersionInstallInfo(minecraftRoot, versionId);
   }
-  if (installInfo.isValid) return versionId;
+  if (installInfo.isValid) {
+    await ensureVersionLibraries(minecraftRoot, versionId, "neoforge");
+    return versionId;
+  }
 
   const fallback = findInstalledVersionCandidate(
     minecraftRoot,
@@ -2787,6 +2888,7 @@ async function ensureNeoForgeInstall(minecraftRoot, javaPath, minecraftVersion) 
   );
   if (fallback) {
     appendLog(`[neoforge] Using installed version ${fallback} (expected ${versionId})`);
+    await ensureVersionLibraries(minecraftRoot, fallback, "neoforge");
     return fallback;
   }
 
@@ -3270,6 +3372,20 @@ ipcMain.handle("versions:get", async () => fetchVersions());
 ipcMain.handle("settings:save", async (_event, settings) => {
   saveSettings(settings);
   return getClientState();
+});
+ipcMain.handle("launch:confirmUnsupportedZenSettings", async (_event, payload) => {
+  const version = String(payload?.minecraftVersion || "").trim() || "this version";
+  const result = await dialog.showMessageBox(mainWindow || undefined, {
+    type: "warning",
+    title: "Zen Client settings unavailable",
+    message: `By launching Minecraft ${version}, you won't be able to use the Zen Client settings yet.`,
+    detail: `Zen Client settings are supported for Minecraft ${ZEN_SETTINGS_MIN_MINECRAFT_VERSION} and newer while older-version support is still in development.`,
+    buttons: ["Continue", "Don't continue"],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true
+  });
+  return result.response === 0;
 });
 ipcMain.handle("account:addOffline", async (_event, payload) => createOfflineAccount(payload.username, payload.uuid));
 ipcMain.handle("account:remove", async (_event, accountId) => {

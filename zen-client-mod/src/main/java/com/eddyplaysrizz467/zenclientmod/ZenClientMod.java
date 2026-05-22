@@ -9,6 +9,8 @@ import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.URI;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -35,7 +37,6 @@ import net.fabricmc.fabric.api.client.screen.v1.Screens;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.gui.screens.Screen;
@@ -66,6 +67,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
@@ -328,11 +330,62 @@ public final class ZenClientMod implements ClientModInitializer {
   }
 
   private static MutableComponent copyableText(String text, String hoverText) {
-    return Component.literal(text).withStyle(style -> style
-      .withColor(ChatFormatting.AQUA)
-      .withUnderlined(true)
-      .withClickEvent(new ClickEvent.CopyToClipboard(text))
-      .withHoverEvent(new HoverEvent.ShowText(Component.literal(hoverText))));
+    ClickEvent clickEvent = createCopyClickEvent(text);
+    HoverEvent hoverEvent = createShowTextHoverEvent(Component.literal(hoverText));
+    return Component.literal(text).withStyle(style -> {
+      var styled = style.withColor(ChatFormatting.AQUA).withUnderlined(true);
+      if (clickEvent != null) styled = styled.withClickEvent(clickEvent);
+      if (hoverEvent != null) styled = styled.withHoverEvent(hoverEvent);
+      return styled;
+    });
+  }
+
+  private static ClickEvent createCopyClickEvent(String text) {
+    try {
+      Class<?> modern = Class.forName("net.minecraft.network.chat.ClickEvent$CopyToClipboard");
+      Constructor<?> constructor = modern.getConstructor(String.class);
+      return (ClickEvent) constructor.newInstance(text);
+    } catch (Exception ignored) {
+      // Fall through to the older 1.21.1 ClickEvent(Action, String) shape.
+    }
+
+    try {
+      Class<?> actionClass = Class.forName("net.minecraft.network.chat.ClickEvent$Action");
+      Object action = fieldValue(actionClass, "COPY_TO_CLIPBOARD");
+      Constructor<ClickEvent> constructor = ClickEvent.class.getConstructor(actionClass, String.class);
+      return constructor.newInstance(action, text);
+    } catch (Exception ignored) {
+      return null;
+    }
+  }
+
+  private static HoverEvent createShowTextHoverEvent(Component text) {
+    try {
+      Class<?> modern = Class.forName("net.minecraft.network.chat.HoverEvent$ShowText");
+      Constructor<?> constructor = modern.getConstructor(Component.class);
+      return (HoverEvent) constructor.newInstance(text);
+    } catch (Exception ignored) {
+      // Fall through to the older 1.21.1 HoverEvent(Action, Component) shape.
+    }
+
+    try {
+      Class<?> actionClass = Class.forName("net.minecraft.network.chat.HoverEvent$Action");
+      Object action = fieldValue(actionClass, "SHOW_TEXT");
+      for (Constructor<?> constructor : HoverEvent.class.getConstructors()) {
+        Class<?>[] parameters = constructor.getParameterTypes();
+        if (parameters.length != 2 || !parameters[0].isAssignableFrom(actionClass)) continue;
+        Object value = parameters[1].isAssignableFrom(Component.class) || parameters[1] == Object.class ? text : text.getString();
+        return (HoverEvent) constructor.newInstance(action, value);
+      }
+    } catch (Exception ignored) {
+      return null;
+    }
+    return null;
+  }
+
+  private static Object fieldValue(Class<?> owner, String name) throws Exception {
+    Field field = owner.getField(name);
+    return field.get(null);
   }
 
   public static String encodeZenInvite(String address) {
@@ -522,12 +575,7 @@ public final class ZenClientMod implements ClientModInitializer {
 
   private static void showStaticToast(Minecraft client, String title, String message) {
     if (client == null) return;
-    SystemToast.addOrUpdate(
-      client.getToastManager(),
-      SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
-      Component.literal(title),
-      Component.literal(message)
-    );
+    sendStaticPlayerMessage(client, title + ": " + message);
   }
 
   private void sendPlayerMessage(Minecraft client, String message) {
@@ -1213,32 +1261,36 @@ public final class ZenClientMod implements ClientModInitializer {
     int centerY = height / 2;
     int edgeX = 18;
     int edgeY = 18;
-    Vec3 projected = client.gameRenderer.projectPointToScreen(worldPos);
-    if (projected == null || !projected.isFinite()) {
+    if (client.player == null) {
       return new ProjectedPoint(centerX, centerY, true, true);
     }
 
-    boolean behind = projected.z < 0.0D;
+    Vec3 delta = worldPos.subtract(client.player.getEyePosition());
+    double horizontal = Math.sqrt((delta.x * delta.x) + (delta.z * delta.z));
+    if (horizontal < 0.0001D && Math.abs(delta.y) < 0.0001D) {
+      return new ProjectedPoint(centerX, centerY, false, false);
+    }
+
+    float targetYaw = (float) (Mth.atan2(delta.z, delta.x) * (180.0D / Math.PI)) - 90.0F;
+    float targetPitch = (float) (-(Mth.atan2(delta.y, horizontal) * (180.0D / Math.PI)));
+    float yawDelta = Mth.wrapDegrees(targetYaw - client.player.getYRot());
+    float pitchDelta = Mth.wrapDegrees(targetPitch - client.player.getXRot());
+    boolean behind = Math.abs(yawDelta) > 90.0F;
+
+    double safeFov = Mth.clamp(fovDegrees, 40.0D, 120.0D);
+    double horizontalTan = Math.tan(Math.toRadians(safeFov / 2.0D));
+    double verticalTan = horizontalTan * (height / (double) Math.max(1, width));
+    double screenX = Math.tan(Math.toRadians(yawDelta)) / Math.max(0.01D, horizontalTan);
+    double screenY = Math.tan(Math.toRadians(pitchDelta)) / Math.max(0.01D, verticalTan);
+
     int rawX;
     int rawY;
     if (behind) {
-      float yaw = Mth.wrapDegrees((float) (Math.toDegrees(Math.atan2(worldPos.z - client.player.getZ(), worldPos.x - client.player.getX())) - 90.0D));
-      float yawDelta = Mth.wrapDegrees(yaw - client.player.getYRot());
       rawX = yawDelta >= 0.0F ? width - edgeX : edgeX;
       rawY = centerY;
     } else {
-      double px = projected.x;
-      double py = projected.y;
-      if (px >= 0.0D && px <= 1.0D && py >= 0.0D && py <= 1.0D) {
-        rawX = (int) Math.round(px * width);
-        rawY = (int) Math.round(py * height);
-      } else if (Math.abs(px) <= 1.0D && Math.abs(py) <= 1.0D) {
-        rawX = (int) Math.round((px * 0.5D + 0.5D) * width);
-        rawY = (int) Math.round((0.5D - py * 0.5D) * height);
-      } else {
-        rawX = (int) Math.round(px);
-        rawY = (int) Math.round(py);
-      }
+      rawX = (int) Math.round(centerX + (screenX * centerX));
+      rawY = (int) Math.round(centerY + (screenY * centerY));
     }
     int clampedX = Mth.clamp(rawX, edgeX, width - edgeX);
     int clampedY = Mth.clamp(rawY, edgeY, height - edgeY - 24);
@@ -1360,7 +1412,8 @@ public final class ZenClientMod implements ClientModInitializer {
     if (!normalFall && !flightDescent) return;
 
     if (player.connection != null) {
-      player.connection.send(new ServerboundMovePlayerPacket.StatusOnly(true, player.horizontalCollision));
+      ServerboundMovePlayerPacket packet = createGroundStatusPacket(player);
+      if (packet != null) player.connection.send(packet);
     }
     player.resetFallDistance();
 
@@ -1368,6 +1421,22 @@ public final class ZenClientMod implements ClientModInitializer {
       player.setDeltaMovement(player.getDeltaMovement().x, -0.35D, player.getDeltaMovement().z);
     } else if (flightDescent && player.getDeltaMovement().y < -0.12D) {
       player.setDeltaMovement(player.getDeltaMovement().x, -0.08D, player.getDeltaMovement().z);
+    }
+  }
+
+  private ServerboundMovePlayerPacket createGroundStatusPacket(LocalPlayer player) {
+    try {
+      Constructor<?> constructor = ServerboundMovePlayerPacket.StatusOnly.class.getConstructor(boolean.class, boolean.class);
+      return (ServerboundMovePlayerPacket) constructor.newInstance(true, player.horizontalCollision);
+    } catch (Exception ignored) {
+      // Older 1.21.x builds only accept the on-ground flag.
+    }
+
+    try {
+      Constructor<?> constructor = ServerboundMovePlayerPacket.StatusOnly.class.getConstructor(boolean.class);
+      return (ServerboundMovePlayerPacket) constructor.newInstance(true);
+    } catch (Exception ignored) {
+      return null;
     }
   }
 
@@ -1538,9 +1607,32 @@ public final class ZenClientMod implements ClientModInitializer {
   }
 
   private String buildPearlCooldown(Player player) {
-    float percent = player.getCooldowns().getCooldownPercent(new ItemStack(Items.ENDER_PEARL), 0.0F);
+    float percent = getEnderPearlCooldown(player);
     if (percent <= 0.0F) return "Pearl Ready";
     return format("Pearl %.1fs", percent * 20.0F);
+  }
+
+  private float getEnderPearlCooldown(Player player) {
+    try {
+      Object value = player.getCooldowns()
+        .getClass()
+        .getMethod("getCooldownPercent", ItemStack.class, float.class)
+        .invoke(player.getCooldowns(), new ItemStack(Items.ENDER_PEARL), 0.0F);
+      if (value instanceof Number number) return number.floatValue();
+    } catch (Exception ignored) {
+      // Fall through to the older Item-based cooldown signature.
+    }
+
+    try {
+      Object value = player.getCooldowns()
+        .getClass()
+        .getMethod("getCooldownPercent", Item.class, float.class)
+        .invoke(player.getCooldowns(), Items.ENDER_PEARL, 0.0F);
+      if (value instanceof Number number) return number.floatValue();
+    } catch (Exception ignored) {
+      return 0.0F;
+    }
+    return 0.0F;
   }
 
   private String buildArmorStatus(Player player) {
@@ -1627,10 +1719,9 @@ public final class ZenClientMod implements ClientModInitializer {
 
   private void handleActiveModulesHotkey(Minecraft client) {
     if (client == null) return;
-    var window = client.getWindow();
-    boolean ctrlDown = InputConstants.isKeyDown(window, GLFW.GLFW_KEY_LEFT_CONTROL)
-      || InputConstants.isKeyDown(window, GLFW.GLFW_KEY_RIGHT_CONTROL);
-    boolean pDown = InputConstants.isKeyDown(window, GLFW.GLFW_KEY_P);
+    boolean ctrlDown = isKeyboardKeyDown(client, GLFW.GLFW_KEY_LEFT_CONTROL)
+      || isKeyboardKeyDown(client, GLFW.GLFW_KEY_RIGHT_CONTROL);
+    boolean pDown = isKeyboardKeyDown(client, GLFW.GLFW_KEY_P);
     boolean comboDown = ctrlDown && pDown;
 
     if (comboDown && !lastCtrlPDown && client.screen == null) {
@@ -1638,6 +1729,30 @@ public final class ZenClientMod implements ClientModInitializer {
     }
 
     lastCtrlPDown = comboDown;
+  }
+
+  private boolean isKeyboardKeyDown(Minecraft client, int key) {
+    try {
+      Object window = client.getWindow();
+      Object value = InputConstants.class
+        .getMethod("isKeyDown", window.getClass(), int.class)
+        .invoke(null, window, key);
+      if (value instanceof Boolean down) return down;
+    } catch (Exception ignored) {
+      // Fall through to the older window-handle signature.
+    }
+
+    try {
+      Object windowHandle = client.getWindow().getClass().getMethod("getWindow").invoke(client.getWindow());
+      if (!(windowHandle instanceof Number number)) return false;
+      Object value = InputConstants.class
+        .getMethod("isKeyDown", long.class, int.class)
+        .invoke(null, number.longValue(), key);
+      if (value instanceof Boolean down) return down;
+    } catch (Exception ignored) {
+      return false;
+    }
+    return false;
   }
 
   private void applyFlightMode(Minecraft client, LocalPlayer player, ZenFlightMode mode, float speed) {

@@ -106,6 +106,7 @@ let serverPluginResultsCache = [];
 let serverPluginBusy = false;
 const activeBamboo = new Map();
 const BAMBOO_COUNT = 5;
+const ZEN_SETTINGS_MIN_MINECRAFT_VERSION = "1.21.1";
 
 function setBusy(nextBusy) {
   busy = nextBusy;
@@ -136,6 +137,36 @@ function setBusy(nextBusy) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseMinecraftVersionParts(version) {
+  const match = String(version || "").trim().match(/^(\d+\.\d+(?:\.\d+)?)/);
+  if (!match) return [];
+  return match[1].split(".").map((part) => Number.parseInt(part, 10)).filter((part) => Number.isFinite(part));
+}
+
+function compareMinecraftVersions(left, right) {
+  const a = parseMinecraftVersionParts(left);
+  const b = parseMinecraftVersionParts(right);
+  if (!a.length || !b.length) return Number.NaN;
+  const length = Math.max(a.length, b.length);
+  for (let i = 0; i < length; i += 1) {
+    const av = a[i] || 0;
+    const bv = b[i] || 0;
+    if (av !== bv) return av - bv;
+  }
+  return 0;
+}
+
+function supportsZenSettingsVersion(version) {
+  const comparison = compareMinecraftVersions(version, ZEN_SETTINGS_MIN_MINECRAFT_VERSION);
+  return Number.isFinite(comparison) && comparison >= 0;
+}
+
+function shouldWarnAboutZenSettings(settings) {
+  const loader = String(settings.launchType || "").trim().toLowerCase();
+  if (!loader || loader === "vanilla") return false;
+  return !supportsZenSettingsVersion(settings.minecraftVersion);
 }
 
 function maybeFinishLoading() {
@@ -1513,12 +1544,24 @@ packsSearch.addEventListener("input", () => renderLibraryList(packsList, modrint
 refreshOptimizationsButton.addEventListener("click", () => loadOptimizations().catch(() => {}));
 
 launchButton.addEventListener("click", async () => {
-  setBusy(true);
-  progressText.textContent = "";
-  statusText.textContent = "Starting Minecraft...";
+  const settings = collectSettings();
   try {
+    if (shouldWarnAboutZenSettings(settings)) {
+      const shouldContinue = await window.aeroApi.confirmUnsupportedZenSettings({
+        minecraftVersion: settings.minecraftVersion,
+        launchType: settings.launchType
+      });
+      if (!shouldContinue) {
+        statusText.textContent = "Launch cancelled.";
+        return;
+      }
+    }
+
+    setBusy(true);
+    progressText.textContent = "";
+    statusText.textContent = "Starting Minecraft...";
     await saveSettings();
-    await window.aeroApi.launchGame(collectSettings());
+    await window.aeroApi.launchGame(settings);
     statusText.textContent = "Minecraft is launching. Watch the built-in log below if something goes wrong.";
   } catch (error) {
     statusText.textContent = `Problem: ${error.message}`;
