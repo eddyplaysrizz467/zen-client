@@ -201,6 +201,10 @@ function isBaseSyncedModManifestEntry(entry) {
   return isZenManagedModManifestEntry(entry) && entry.source === "base-mods-sync";
 }
 
+function isCrashQuarantinedModManifestEntry(entry) {
+  return isZenManagedModManifestEntry(entry) && entry.disabled === true && entry.source === "crash-quarantine";
+}
+
 function isZenManagedModFile(minecraftRoot, fileName) {
   const manifest = readInstanceManifest(minecraftRoot);
   return isZenManagedModManifestEntry(manifest[fileName]);
@@ -319,6 +323,11 @@ function syncBaseModsToInstance(baseMinecraftRoot, minecraftRoot, selectedVersio
     const sourceStat = fs.statSync(sourcePath);
     const targetManifestEntry = manifest[entry.name];
 
+    if (isCrashQuarantinedModManifestEntry(targetManifestEntry) && !fs.existsSync(targetPath)) {
+      skipped.push({ name: entry.name, reason: "disabled after a crash" });
+      continue;
+    }
+
     if (fs.existsSync(targetPath) && !isBaseSyncedModManifestEntry(targetManifestEntry)) {
       skipped.push({ name: entry.name, reason: "already exists in instance" });
       continue;
@@ -407,7 +416,7 @@ function normalizeModHint(value) {
     .replace(/[^a-z0-9]+/g, "");
 }
 
-function moveModToDisabled(minecraftRoot, fileName, reason) {
+function moveModToDisabled(minecraftRoot, fileName, reason, options = {}) {
   const modsDir = path.join(minecraftRoot, "mods");
   const source = path.join(modsDir, fileName);
   if (!fs.existsSync(source)) return null;
@@ -421,7 +430,18 @@ function moveModToDisabled(minecraftRoot, fileName, reason) {
   fs.renameSync(source, target);
 
   const manifest = readInstanceManifest(minecraftRoot);
-  delete manifest[fileName];
+  if (options.rememberQuarantine) {
+    manifest[fileName] = {
+      ...manifest[fileName],
+      projectType: "mod",
+      source: "crash-quarantine",
+      disabled: true,
+      disabledReason: reason,
+      disabledAt: new Date().toISOString()
+    };
+  } else {
+    delete manifest[fileName];
+  }
   writeInstanceManifest(minecraftRoot, manifest);
   return { name: fileName, reason };
 }
@@ -436,7 +456,7 @@ function findInstalledModJar(modsDir, hint) {
 function recoverFromLaunchCrash(minecraftRoot, exitCode) {
   if (!minecraftRoot || !fs.existsSync(minecraftRoot)) return [];
 
-  const crashyExitCodes = new Set([1, 3221225477, -1073741819]);
+  const crashyExitCodes = new Set([1, -1, 4294967295, 3221225477, -1073741819]);
   if (!crashyExitCodes.has(Number(exitCode))) return [];
 
   const latestLog = readTextIfExists(path.join(minecraftRoot, "logs", "latest.log"));
@@ -481,13 +501,13 @@ function recoverFromLaunchCrash(minecraftRoot, exitCode) {
     /kaptainwutax\.seedcrackerx/i.test(combined) &&
     (/TrialChambersFinder/i.test(combined) || /FinderQueue/i.test(combined) || /field_1687.*null/i.test(combined))
   ) {
-    queueRecovery("seedcracker", "crashed while scanning chunks after the world unloaded", { force: true });
+    queueRecovery("seedcracker", "crashed while scanning chunks after the world unloaded", { force: true, rememberQuarantine: true });
   }
 
   const moved = [];
   for (const item of recoveries.slice(0, 2)) {
     if (!item.force && !isZenManagedModFile(minecraftRoot, item.jar)) continue;
-    const result = moveModToDisabled(minecraftRoot, item.jar, item.reason);
+    const result = moveModToDisabled(minecraftRoot, item.jar, item.reason, { rememberQuarantine: item.rememberQuarantine });
     if (result) moved.push(result);
   }
   return moved;
