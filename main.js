@@ -29,7 +29,6 @@ const ZEN_CLIENT_BUNDLE_MANIFEST_FILENAME = "zen-client-bundles.json";
 const ZEN_CLIENT_MOD_FILENAME = "zen-client-fabric.jar";
 const ZEN_CLIENT_MOD_FILENAME_TEMPLATE = "zen-client-fabric-%VERSION%.jar";
 const ZEN_SETTINGS_MIN_MINECRAFT_VERSION = "1.21.1";
-const BASE_MOD_SYNC_MIN_MINECRAFT_VERSION = "1.21.11";
 const ZEN_SETTINGS_RELEASE_SERIES = [
   "1.21.11",
   "1.21.10",
@@ -197,22 +196,9 @@ function isZenBundledModManifestEntry(entry) {
   return isZenManagedModManifestEntry(entry) && String(entry.slug || "").startsWith("zen-client-");
 }
 
-function isBaseSyncedModManifestEntry(entry) {
-  return isZenManagedModManifestEntry(entry) && entry.source === "base-mods-sync";
-}
-
-function isCrashQuarantinedModManifestEntry(entry) {
-  return isZenManagedModManifestEntry(entry) && entry.disabled === true && entry.source === "crash-quarantine";
-}
-
 function isZenManagedModFile(minecraftRoot, fileName) {
   const manifest = readInstanceManifest(minecraftRoot);
   return isZenManagedModManifestEntry(manifest[fileName]);
-}
-
-function shouldSyncBaseModsToInstance(selectedVersion) {
-  const version = String(selectedVersion || "").trim();
-  return isModernMinecraftRelease(version) && compareMcVersions(version, BASE_MOD_SYNC_MIN_MINECRAFT_VERSION) >= 0;
 }
 
 function parseMinecraftVersionHints(fileName) {
@@ -265,8 +251,7 @@ function auditInstanceMods(minecraftRoot, selectedVersion, selectedLoader) {
   ensureDir(modsDir);
 
   const manifest = readInstanceManifest(minecraftRoot);
-  const disabledDir = path.join(minecraftRoot, "mods-disabled");
-  const quarantined = [];
+  const removed = [];
 
   for (const entry of fs.readdirSync(modsDir, { withFileTypes: true })) {
     if (!entry.isFile()) continue;
@@ -278,94 +263,17 @@ function auditInstanceMods(minecraftRoot, selectedVersion, selectedLoader) {
     const reason = modLooksIncompatible(entry.name, selectedVersion, selectedLoader, manifestEntry);
     if (!reason) continue;
 
-    ensureDir(disabledDir);
     const fromPath = path.join(modsDir, entry.name);
-    let toPath = path.join(disabledDir, entry.name);
-    if (fs.existsSync(toPath)) {
-      toPath = path.join(disabledDir, `${Date.now()}-${entry.name}`);
-    }
-    fs.renameSync(fromPath, toPath);
-    quarantined.push({ name: entry.name, reason });
+    fs.unlinkSync(fromPath);
+    removed.push({ name: entry.name, reason });
     delete manifest[entry.name];
   }
 
-  if (quarantined.length) {
+  if (removed.length) {
     writeInstanceManifest(minecraftRoot, manifest);
   }
 
-  return quarantined;
-}
-
-function syncBaseModsToInstance(baseMinecraftRoot, minecraftRoot, selectedVersion, selectedLoader) {
-  if (!shouldSyncBaseModsToInstance(selectedVersion)) return [];
-
-  const baseRoot = path.resolve(String(baseMinecraftRoot || DEFAULT_ROOT));
-  const instanceRoot = path.resolve(String(minecraftRoot || baseRoot));
-  if (baseRoot.toLowerCase() === instanceRoot.toLowerCase()) return [];
-
-  const sourceModsDir = path.join(baseRoot, "mods");
-  if (!fs.existsSync(sourceModsDir)) return [];
-
-  const targetModsDir = path.join(instanceRoot, "mods");
-  ensureDir(targetModsDir);
-
-  const manifest = readInstanceManifest(instanceRoot);
-  const copied = [];
-  const skipped = [];
-
-  for (const entry of fs.readdirSync(sourceModsDir, { withFileTypes: true })) {
-    if (!entry.isFile()) continue;
-    if (!entry.name.toLowerCase().endsWith(".jar")) continue;
-    if (BUNDLED_ZEN_CLIENT_MOD_NAMES.has(entry.name)) continue;
-
-    const sourcePath = path.join(sourceModsDir, entry.name);
-    const targetPath = path.join(targetModsDir, entry.name);
-    const sourceStat = fs.statSync(sourcePath);
-    const targetManifestEntry = manifest[entry.name];
-
-    if (isCrashQuarantinedModManifestEntry(targetManifestEntry) && !fs.existsSync(targetPath)) {
-      skipped.push({ name: entry.name, reason: "disabled after a crash" });
-      continue;
-    }
-
-    if (fs.existsSync(targetPath) && !isBaseSyncedModManifestEntry(targetManifestEntry)) {
-      skipped.push({ name: entry.name, reason: "already exists in instance" });
-      continue;
-    }
-
-    const targetStat = fs.existsSync(targetPath) ? fs.statSync(targetPath) : null;
-    const needsCopy =
-      !targetStat ||
-      targetStat.size !== sourceStat.size ||
-      Math.abs(targetStat.mtimeMs - sourceStat.mtimeMs) > 1000;
-
-    if (!needsCopy) continue;
-
-    fs.copyFileSync(sourcePath, targetPath);
-    try {
-      fs.utimesSync(targetPath, sourceStat.atime, sourceStat.mtime);
-    } catch {
-      // Timestamp sync is nice for change detection, not required.
-    }
-
-    manifest[entry.name] = {
-      ...targetManifestEntry,
-      projectType: "mod",
-      loader: normalizeLoaderForModrinth(selectedLoader),
-      minecraftVersion: selectedVersion,
-      slug: "base-mods-sync",
-      source: "base-mods-sync",
-      sourcePath,
-      recordedAt: new Date().toISOString()
-    };
-    copied.push(entry.name);
-  }
-
-  if (copied.length) writeInstanceManifest(instanceRoot, manifest);
-  if (skipped.length) {
-    appendLog(`[mods] Skipped ${skipped.length} base mod sync item(s) because instance copies already exist.`);
-  }
-  return copied;
+  return removed;
 }
 
 function ensureSafeVideoMode(minecraftRoot) {
@@ -416,32 +324,15 @@ function normalizeModHint(value) {
     .replace(/[^a-z0-9]+/g, "");
 }
 
-function moveModToDisabled(minecraftRoot, fileName, reason, options = {}) {
+function deleteCrashSuspectedMod(minecraftRoot, fileName, reason) {
   const modsDir = path.join(minecraftRoot, "mods");
   const source = path.join(modsDir, fileName);
   if (!fs.existsSync(source)) return null;
 
-  const disabledDir = path.join(minecraftRoot, "mods-disabled");
-  ensureDir(disabledDir);
-  let target = path.join(disabledDir, fileName);
-  if (fs.existsSync(target)) {
-    target = path.join(disabledDir, `${Date.now()}-${fileName}`);
-  }
-  fs.renameSync(source, target);
+  fs.unlinkSync(source);
 
   const manifest = readInstanceManifest(minecraftRoot);
-  if (options.rememberQuarantine) {
-    manifest[fileName] = {
-      ...manifest[fileName],
-      projectType: "mod",
-      source: "crash-quarantine",
-      disabled: true,
-      disabledReason: reason,
-      disabledAt: new Date().toISOString()
-    };
-  } else {
-    delete manifest[fileName];
-  }
+  delete manifest[fileName];
   writeInstanceManifest(minecraftRoot, manifest);
   return { name: fileName, reason };
 }
@@ -501,16 +392,16 @@ function recoverFromLaunchCrash(minecraftRoot, exitCode) {
     /kaptainwutax\.seedcrackerx/i.test(combined) &&
     (/TrialChambersFinder/i.test(combined) || /FinderQueue/i.test(combined) || /field_1687.*null/i.test(combined))
   ) {
-    queueRecovery("seedcracker", "crashed while scanning chunks after the world unloaded", { force: true, rememberQuarantine: true });
+    queueRecovery("seedcracker", "crashed while scanning chunks after the world unloaded", { force: true });
   }
 
-  const moved = [];
+  const removed = [];
   for (const item of recoveries.slice(0, 2)) {
     if (!item.force && !isZenManagedModFile(minecraftRoot, item.jar)) continue;
-    const result = moveModToDisabled(minecraftRoot, item.jar, item.reason, { rememberQuarantine: item.rememberQuarantine });
-    if (result) moved.push(result);
+    const result = deleteCrashSuspectedMod(minecraftRoot, item.jar, item.reason);
+    if (result) removed.push(result);
   }
-  return moved;
+  return removed;
 }
 
 function pickNewestFile(paths) {
@@ -3035,36 +2926,6 @@ async function ensureNeoForgeInstall(minecraftRoot, javaPath, minecraftVersion) 
   throw new Error("NeoForge installed, but the launcher could not find the NeoForge version JSON. Check the log above for installer output.");
 }
 
-const MODRINTH_BASE_MODS = [
-  { slug: "sodium", label: "Sodium" },
-  { slug: "iris", label: "Iris Shaders" },
-  { slug: "entityculling", label: "Entity Culling" },
-  { slug: "ferrite-core", label: "FerriteCore" },
-  { slug: "immediatelyfast", label: "ImmediatelyFast" },
-  { slug: "lithium", label: "Lithium" },
-  { slug: "cloth-config", label: "Cloth Config API" },
-  { slug: "modmenu", label: "Mod Menu" }
-];
-
-// Extra performance/helpful mods (limit 5, as requested). These are optional: we only install them if a compatible version exists.
-const MODRINTH_EXTRA_MODS = [
-  { slug: "indium", label: "Indium (Sodium compatibility)" },
-  { slug: "krypton", label: "Krypton (network optimizations)" },
-  { slug: "starlight", label: "Starlight (lighting performance)" },
-  { slug: "dynamic-fps", label: "Dynamic FPS (background FPS limiter)" }
-];
-
-const MODRINTH_NEOFORGE_MODS = [
-  { slug: "sodium", label: "Sodium" },
-  { slug: "lithium", label: "Lithium" },
-  { slug: "entityculling", label: "Entity Culling" },
-  { slug: "ferrite-core", label: "FerriteCore" },
-  { slug: "immediatelyfast", label: "ImmediatelyFast" },
-  { slug: "modernfix", label: "ModernFix" },
-  { slug: "cloth-config", label: "Cloth Config API" },
-  { slug: "dynamic-fps", label: "Dynamic FPS (background FPS limiter)" }
-];
-
 async function modrinthFetchProjectVersion(slug, minecraftVersion, loader) {
   const encodedGameVersions = encodeURIComponent(JSON.stringify([minecraftVersion]));
   const encodedLoaders = encodeURIComponent(JSON.stringify([loader]));
@@ -3090,49 +2951,6 @@ async function modrinthPickDownload(slug, minecraftVersion, launchType) {
   const primary = files.find((f) => f?.primary) || files[0];
   if (!primary?.url) return null;
   return { url: primary.url, filename: primary.filename || `${slug}.jar` };
-}
-
-async function ensureModrinthMods(minecraftRoot, minecraftVersion, launchType) {
-  const selected = normalizeLoaderForModrinth(launchType);
-  if (selected !== "fabric" && selected !== "quilt" && selected !== "neoforge") return;
-  if (!shouldSyncBaseModsToInstance(minecraftVersion)) {
-    appendLog(`[mods] Skipping automatic performance mods for ${selected} ${minecraftVersion}; lower version folders only receive the Zen Client mod.`);
-    return;
-  }
-  if (selected === "quilt") {
-    appendLog("[mods] Skipping automatic performance mod pack for Quilt to avoid loader compatibility issues.");
-    return;
-  }
-
-  const modsDir = path.join(minecraftRoot, "mods");
-  ensureDir(modsDir);
-
-  const wanted = selected === "neoforge" ? MODRINTH_NEOFORGE_MODS : [...MODRINTH_BASE_MODS, ...MODRINTH_EXTRA_MODS];
-  for (const mod of wanted) {
-    const slug = mod.slug;
-    const label = mod.label || slug;
-    const target = path.join(modsDir, `${slug}.jar`);
-    if (fs.existsSync(target)) continue;
-
-    try {
-      appendLog(`[mods] Resolving ${label}...`);
-      const download = await modrinthPickDownload(slug, minecraftVersion, launchType);
-      if (!download) {
-        appendLog(`[mods] No compatible Modrinth file found for ${label} (${minecraftVersion}, ${selected}). Skipping.`);
-        continue;
-      }
-      await ensureFile(download.url, target);
-      recordInstalledModrinthFile(minecraftRoot, path.basename(target), {
-        projectType: "mod",
-        loader: selected,
-        minecraftVersion,
-        slug
-      });
-      appendLog(`[mods] Installed ${label} -> ${path.basename(target)}`);
-    } catch (error) {
-      appendLog(`[mods] Failed to install ${label}: ${error?.message || String(error)}`);
-    }
-  }
 }
 
 async function ensureZenClientDependencies(minecraftRoot, minecraftVersion, launchType) {
@@ -3294,26 +3112,19 @@ async function launchGame(settings) {
     appendLog("[launch] Applied safe video mode (windowed 1280x720) before startup.");
   }
 
-  const syncedMods = syncBaseModsToInstance(baseMinecraftRoot, minecraftRoot, selectedVersion, selectedType);
-  if (syncedMods.length) {
-    appendLog(`[mods] Synced ${syncedMods.length} mod(s) from your main mods folder into this ${selectedType} ${selectedVersion} instance.`);
-  }
-
-  const quarantinedMods = auditInstanceMods(minecraftRoot, selectedVersion, selectedType);
-  for (const item of quarantinedMods) {
-    appendLog(`[mods] Disabled ${item.name} (${item.reason}) -> mods-disabled`);
+  const incompatibleMods = auditInstanceMods(minecraftRoot, selectedVersion, selectedType);
+  for (const item of incompatibleMods) {
+    appendLog(`[mods] Deleted ${item.name} because it is incompatible (${item.reason}).`);
   }
 
   const previousCrashRecoveries = recoverFromLaunchCrash(minecraftRoot, 1);
   for (const item of previousCrashRecoveries) {
-    appendLog(`[mods] Disabled ${item.name} from a previous launch issue (${item.reason}) -> mods-disabled`);
+    appendLog(`[mods] Deleted ${item.name} from a previous launch issue (${item.reason}).`);
   }
 
   await ensureZenClientModForVersionFolders(baseMinecraftRoot, selectedType, selectedVersion);
   await ensureZenClientDependencies(minecraftRoot, selectedVersion, selectedType);
   await ensureZenClientMod(minecraftRoot, selectedType, selectedVersion);
-  // Auto-install requested performance mods for loader/version pairs that Modrinth supports.
-  await ensureModrinthMods(minecraftRoot, selectedVersion, selectedType);
 
   updateState((draft) => {
     draft.settings = {
@@ -3341,7 +3152,7 @@ async function launchGame(settings) {
     appendLog(`[launch] Minecraft closed with exit code ${code}`);
     const recovered = recoverFromLaunchCrash(currentLaunchContext?.minecraftRoot, code);
     for (const item of recovered) {
-      appendLog(`[mods] Disabled ${item.name} due to a launch issue (${item.reason}). Please relaunch.`);
+      appendLog(`[mods] Deleted ${item.name} due to a launch issue (${item.reason}). Please relaunch.`);
     }
     sendEvent("launcher-closed", { code });
     currentLaunchContext = null;
@@ -3650,10 +3461,6 @@ ipcMain.handle("library:scanInstalled", async (_event, payload) => {
 
   ensureDir(modsDir);
   ensureDir(packsDir);
-  const syncedMods = syncBaseModsToInstance(baseRoot, root, payload?.minecraftVersion, payload?.launchType);
-  if (syncedMods.length) {
-    appendLog(`[mods] Synced ${syncedMods.length} mod(s) into this ${payload?.launchType || "selected"} ${payload?.minecraftVersion || ""} instance.`);
-  }
   await ensureZenClientModForVersionFolders(baseRoot, payload?.launchType, payload?.minecraftVersion);
 
   const readNames = (dir) =>
