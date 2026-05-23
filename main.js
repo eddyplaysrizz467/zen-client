@@ -3043,7 +3043,8 @@ async function ensureZenClientMod(minecraftRoot, launchType, minecraftVersion) {
   const needsCopy =
     !targetStat ||
     targetStat.size !== sourceStat.size ||
-    Math.abs(targetStat.mtimeMs - sourceStat.mtimeMs) > 1000;
+    crypto.createHash("sha256").update(fs.readFileSync(target)).digest("hex") !==
+      crypto.createHash("sha256").update(fs.readFileSync(source)).digest("hex");
 
   if (!needsCopy) return;
 

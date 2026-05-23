@@ -1,4 +1,5 @@
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const { spawnSync } = require("child_process");
 
@@ -104,6 +105,7 @@ function inferLoaderBundleSpecs() {
 }
 
 fs.mkdirSync(bundledDir, { recursive: true });
+const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), "zen-client-mod-bundles-"));
 const minecraftVersion = readGradleProperty("minecraft_version") || ZEN_SETTINGS_CURRENT_MINECRAFT_VERSION;
 const buildTargets = [
   {
@@ -126,11 +128,14 @@ const buildTargets = [
 
 const builtTargets = buildTargets.map((target) => {
   runBuild(target.properties);
-  const sourceJar = pickJar();
+  const builtJar = pickJar();
+  const sourceJarName = path.basename(builtJar);
+  const sourceJar = path.join(stagingDir, `${target.key}-${sourceJarName}`);
+  fs.copyFileSync(builtJar, sourceJar);
   return {
     ...target,
     sourceJar,
-    sourceJarName: path.basename(sourceJar)
+    sourceJarName
   };
 });
 
@@ -187,6 +192,7 @@ for (const bundle of inferLoaderBundleSpecs()) {
   else bundles.push(bundle);
 }
 
+const defaultBundleSources = new Map();
 for (const bundle of bundles) {
   const target = path.join(bundledDir, bundle.file);
   const bundleSource = bundle.sourcePath;
@@ -194,7 +200,13 @@ for (const bundle of bundles) {
   fs.copyFileSync(bundleSource, target);
   console.log(`[zen-mod] bundled ${path.basename(bundleSource)} -> ${target}`);
 
-  const unversionedTarget = path.join(bundledDir, bundle.targetName);
+  if (!defaultBundleSources.has(bundle.targetName) || String(bundle.minecraftVersion) === String(minecraftVersion)) {
+    defaultBundleSources.set(bundle.targetName, bundleSource);
+  }
+}
+
+for (const [targetName, bundleSource] of defaultBundleSources.entries()) {
+  const unversionedTarget = path.join(bundledDir, targetName);
   fs.copyFileSync(bundleSource, unversionedTarget);
   console.log(`[zen-mod] bundled ${path.basename(bundleSource)} -> ${unversionedTarget}`);
 }
@@ -221,3 +233,4 @@ fs.writeFileSync(
   "utf8"
 );
 console.log(`[zen-mod] wrote bundle manifest -> ${bundleManifestPath}`);
+fs.rmSync(stagingDir, { recursive: true, force: true });

@@ -617,7 +617,9 @@ public final class ZenClientMod implements ClientModInitializer {
     pruneClicks(System.currentTimeMillis());
 
     LocalPlayer player = client.player;
-    updateEstimatedServerTps(client);
+    if (CONFIG.isEnabled(ZenFeature.TPS_COUNTER)) {
+      updateEstimatedServerTps(client);
+    }
     updateDamageCounter(client);
     maintainFullbright(client, player);
     maintainClientOptions(client);
@@ -790,7 +792,16 @@ public final class ZenClientMod implements ClientModInitializer {
     if (client.level == null) return;
 
     long now = System.currentTimeMillis();
-    long worldGameTime = client.level.getGameTime();
+    long worldGameTime;
+    try {
+      worldGameTime = client.level.getGameTime();
+    } catch (LinkageError error) {
+      SERVER_TPS_SAMPLES.clear();
+      lastServerSampleAt = 0L;
+      lastWorldGameTime = Long.MIN_VALUE;
+      estimatedServerTps = 20.0D;
+      return;
+    }
 
     if (lastServerSampleAt == 0L || lastWorldGameTime == Long.MIN_VALUE) {
       lastServerSampleAt = now;
