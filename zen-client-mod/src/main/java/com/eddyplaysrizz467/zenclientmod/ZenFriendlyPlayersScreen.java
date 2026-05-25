@@ -34,17 +34,15 @@ public final class ZenFriendlyPlayersScreen extends Screen {
       int y = startY + (row * 28);
 
       addRenderableWidget(
-        Button.builder(buildButtonText(name), button -> {
+        ZenGreenButton.create(buildButtonText(name), button -> {
           ZenClientMod.config().toggleFriendlyPlayerName(name);
           button.setMessage(buildButtonText(name));
-        }).bounds(x, y, columnWidth, 20).build()
+        }, x, y, columnWidth, 20)
       );
     }
 
     addRenderableWidget(
-      Button.builder(Component.literal("Back"), button -> this.minecraft.setScreen(parent))
-        .bounds((this.width / 2) - 68, this.height - 34, 136, 20)
-        .build()
+      ZenGreenButton.create(Component.literal("Back"), button -> this.minecraft.setScreen(parent), (this.width / 2) - 68, this.height - 34, 136, 20)
     );
   }
 
@@ -73,15 +71,15 @@ public final class ZenFriendlyPlayersScreen extends Screen {
 
   @Override
   public void render(GuiGraphics context, int mouseX, int mouseY, float delta) {
+    ZenTheme.renderGreenFireBackground(context, this.width, this.height, delta);
     int panelLeft = (this.width / 2) - 250;
     int panelRight = (this.width / 2) + 250;
     int panelTop = 18;
     int panelBottom = this.height - 48;
-    context.fill(panelLeft, panelTop, panelRight, panelBottom, 0xCC090909);
-    context.fill(panelLeft, panelTop, panelRight, panelTop + 34, 0xE1121212);
+    ZenTheme.renderPanel(context, panelLeft, panelTop, panelRight, panelBottom);
     super.render(context, mouseX, mouseY, delta);
-    context.drawCenteredString(this.font, this.title, this.width / 2, 28, 0xFFFFFFFF);
-    context.drawCenteredString(this.font, Component.literal("Pick which players count as allies for the co-op overlay"), this.width / 2, 46, 0xFF9E9E9E);
+    ZenTheme.drawCenteredOutlinedString(context, this.font, this.title, this.width / 2, 28, ZenTheme.WHITE, 0xFF063711);
+    ZenTheme.drawCenteredOutlinedString(context, this.font, Component.literal("Pick which players count as allies for the co-op overlay"), this.width / 2, 46, ZenTheme.TEXT_SOFT, 0xFF063711);
   }
 
   @Override

@@ -1,4 +1,29 @@
+@font-face {
+  font-family: "Antipasto Pro";
+  src: url("./assets/fonts/AntipastoPro-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Antipasto Pro";
+  src: url("./assets/fonts/AntipastoPro-Medium.ttf") format("truetype");
+  font-weight: 600 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Antipasto Pro";
+  src: url("./assets/fonts/AntipastoPro-Bold.ttf") format("truetype");
+  font-weight: 801 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
+  --font-main: "Antipasto Pro", "Segoe UI", system-ui, sans-serif;
   --bg-deep: #070707;
   --bg-mid: #101010;
   --bg-light: #1a1a1a;
@@ -64,7 +89,7 @@ html[data-preset="bamboo"] {
 html, body {
   margin: 0;
   min-height: 100%;
-  font-family: "Segoe UI", system-ui, sans-serif;
+  font-family: var(--font-main);
   color: var(--text);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
@@ -417,7 +442,8 @@ body {
 .brand h1 {
   margin: 0;
   font-size: 1.65rem;
-  font-family: Georgia, serif;
+  font-family: var(--font-main);
+  font-weight: 900;
 }
 
 .brand p,
@@ -566,7 +592,8 @@ body {
 .offline-form h3 {
   margin: 0;
   font-size: 1.08rem;
-  font-family: Georgia, serif;
+  font-family: var(--font-main);
+  font-weight: 900;
 }
 
 .accounts-card,
