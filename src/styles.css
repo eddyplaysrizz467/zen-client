@@ -24,6 +24,7 @@
 
 :root {
   --font-main: "Antipasto Pro", "Segoe UI", system-ui, sans-serif;
+  --font-readable: "Segoe UI", system-ui, sans-serif;
   --bg-deep: #070707;
   --bg-mid: #101010;
   --bg-light: #1a1a1a;
@@ -460,6 +461,7 @@ body {
   color: var(--accent);
   font-weight: 600;
   font-size: 0.9rem;
+  font-family: var(--font-readable);
 }
 
 .update-notice {
@@ -641,6 +643,7 @@ body {
 .account-name {
   display: block;
   font-weight: 700;
+  font-family: var(--font-readable);
 }
 
 .account-type {
@@ -739,6 +742,7 @@ select {
   color: var(--text);
   padding: 0.56rem 0.68rem;
   font: inherit;
+  font-family: var(--font-readable);
   outline: none;
   border: var(--border-soft);
   transition: background 180ms ease, box-shadow 180ms ease, border-color 180ms ease, transform 180ms ease;
@@ -814,6 +818,7 @@ select {
   border: 1px solid rgba(216, 236, 211, 0.18);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055);
   color: var(--text);
+  font-family: var(--font-readable);
   font-weight: 800;
 }
 
@@ -869,6 +874,7 @@ select {
   background: transparent;
   color: rgba(238, 245, 237, 0.9);
   box-shadow: none;
+  font-family: var(--font-readable);
   font-weight: 760;
   padding: 0.45rem 0.62rem;
 }
@@ -963,6 +969,7 @@ option,
 optgroup {
   background-color: #0f0f0f;
   color: #f2f2f2;
+  font-family: var(--font-readable);
 }
 
 input::placeholder {
@@ -997,6 +1004,7 @@ input::placeholder {
 
 .status-text {
   color: var(--good);
+  font-family: var(--font-readable);
   font-weight: 700;
 }
 
@@ -1004,6 +1012,7 @@ input::placeholder {
   min-height: 1.2rem;
   color: var(--accent);
   margin-top: 0.45rem;
+  font-family: var(--font-readable);
 }
 
 .log-box {
@@ -1135,6 +1144,7 @@ input::placeholder {
 .friend-code-value {
   margin-top: 0.16rem;
   color: var(--accent-strong);
+  font-family: var(--font-readable);
   font-weight: 850;
   word-break: break-word;
 }
@@ -1167,6 +1177,7 @@ input::placeholder {
 
 .friend-name {
   color: var(--text);
+  font-family: var(--font-readable);
   font-weight: 850;
 }
 
@@ -1234,6 +1245,7 @@ input::placeholder {
   margin-top: 0.22rem;
   font-size: 0.8rem;
   color: var(--text-mute);
+  font-family: var(--font-readable);
 }
 
 .optimization-badge {
@@ -1349,6 +1361,7 @@ input::placeholder {
 
 .library-item-meta {
   color: var(--text-mute);
+  font-family: var(--font-readable);
   font-size: 0.92rem;
 }
 
@@ -1404,6 +1417,7 @@ input::placeholder {
 .skin-preview-meta {
   margin-top: 0.45rem;
   color: var(--text-mute);
+  font-family: var(--font-readable);
   font-size: 0.9rem;
 }
 
