@@ -1421,6 +1421,11 @@ input::placeholder {
   font-size: 0.9rem;
 }
 
+.readable-number {
+  font-family: var(--font-readable);
+  font-variant-numeric: tabular-nums;
+}
+
 .skin-actions {
   background: var(--card-soft);
   border-radius: var(--radius-lg);

@@ -1939,11 +1939,13 @@ async function openManagedServerFirewall(address) {
   const port = parseServerPort(profile.address);
   const state = loadState();
   const javaPath = await findJavaExecutable(state.settings?.javaPath, state.settings?.minecraftDirectory || DEFAULT_ROOT, version);
+  const localAddress = bestLocalIpv4();
   const scriptPath = path.join(APP_DIR, "open-managed-server-firewall.ps1");
   const ruleName = `Zen Client Managed Server ${port}`;
   const script = [
     "$ErrorActionPreference = 'Stop'",
     `$port = ${port}`,
+    `$localAddress = ${JSON.stringify(localAddress)}`,
     `$javaPath = ${JSON.stringify(javaPath)}`,
     `$ruleName = ${JSON.stringify(ruleName)}`,
     "netsh advfirewall firewall delete rule name=\"$ruleName\" | Out-Null",
@@ -1951,7 +1953,20 @@ async function openManagedServerFirewall(address) {
     "if (Test-Path -LiteralPath $javaPath) {",
     "  netsh advfirewall firewall add rule name=\"$ruleName Java\" dir=in action=allow program=\"$javaPath\" profile=any | Out-Null",
     "}",
-    "Write-Host \"Zen Client firewall rules added for TCP port $port.\""
+    "$upnpMessage = 'UPnP router mapping not available.'",
+    "try {",
+    "  $upnp = New-Object -ComObject HNetCfg.NATUPnP",
+    "  $mappings = $upnp.StaticPortMappingCollection",
+    "  if ($null -ne $mappings) {",
+    "    try { $mappings.Remove($port, 'TCP') | Out-Null } catch {}",
+    "    $mappings.Add($port, 'TCP', $port, $localAddress, $true, 'Zen Client Minecraft Server') | Out-Null",
+    "    $upnpMessage = \"UPnP router mapping requested: TCP $port -> $($localAddress):$port\"",
+    "  }",
+    "} catch {",
+    "  $upnpMessage = \"UPnP router mapping failed: $($_.Exception.Message)\"",
+    "}",
+    "Write-Host \"Zen Client firewall rules added for TCP port $port.\"",
+    "Write-Host $upnpMessage"
   ].join("\r\n");
   fs.writeFileSync(scriptPath, script, "utf8");
 
@@ -1969,8 +1984,8 @@ async function openManagedServerFirewall(address) {
   appendLog(`[server] Requested Windows Firewall rules for TCP port ${port}.`);
   return {
     port,
-    localAddress: bestLocalIpv4(),
-    message: `Approve the Windows prompt, then forward TCP port ${port} to ${bestLocalIpv4()} in your router.`
+    localAddress,
+    message: `Approve the Windows prompt. Zen will also try UPnP; if friends still time out, manually forward TCP ${port} to ${localAddress}:${port} in your router.`
   };
 }
 

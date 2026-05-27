@@ -107,6 +107,8 @@ let serverPluginBusy = false;
 const activeBamboo = new Map();
 const BAMBOO_COUNT = 5;
 const ZEN_SETTINGS_MIN_MINECRAFT_VERSION = "1.21.1";
+const READABLE_NUMBER_TOKEN_PATTERN = /\S*\d\S*/g;
+let readableNumberFrame = 0;
 
 function setBusy(nextBusy) {
   busy = nextBusy;
@@ -137,6 +139,66 @@ function setBusy(nextBusy) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shouldSkipReadableNumberNode(parent) {
+  if (!parent || parent.nodeType !== Node.ELEMENT_NODE) return true;
+  const tagName = parent.tagName;
+  if (["SCRIPT", "STYLE", "TEXTAREA", "SELECT", "OPTION"].includes(tagName)) return true;
+  return Boolean(parent.closest(".readable-number, .log-box, .server-plugin-code"));
+}
+
+function applyReadableNumberFonts(root = document.body) {
+  if (!root) return;
+  const nodes = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!node.nodeValue || !/\d/.test(node.nodeValue)) return NodeFilter.FILTER_REJECT;
+      if (shouldSkipReadableNumberNode(node.parentElement)) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+
+  nodes.forEach((node) => {
+    const text = node.nodeValue || "";
+    READABLE_NUMBER_TOKEN_PATTERN.lastIndex = 0;
+    if (!READABLE_NUMBER_TOKEN_PATTERN.test(text)) return;
+    READABLE_NUMBER_TOKEN_PATTERN.lastIndex = 0;
+
+    const fragment = document.createDocumentFragment();
+    let cursor = 0;
+    for (const match of text.matchAll(READABLE_NUMBER_TOKEN_PATTERN)) {
+      const index = match.index || 0;
+      if (index > cursor) fragment.append(document.createTextNode(text.slice(cursor, index)));
+      const span = document.createElement("span");
+      span.className = "readable-number";
+      span.textContent = match[0];
+      fragment.append(span);
+      cursor = index + match[0].length;
+    }
+    if (cursor < text.length) fragment.append(document.createTextNode(text.slice(cursor)));
+    node.replaceWith(fragment);
+  });
+}
+
+function scheduleReadableNumberFonts() {
+  if (readableNumberFrame) return;
+  readableNumberFrame = requestAnimationFrame(() => {
+    readableNumberFrame = 0;
+    applyReadableNumberFonts(appShell || document.body);
+  });
+}
+
+function initReadableNumberFonts() {
+  scheduleReadableNumberFonts();
+  const observer = new MutationObserver((mutations) => {
+    if (mutations.some((mutation) => mutation.type === "characterData" || mutation.addedNodes.length)) {
+      scheduleReadableNumberFonts();
+    }
+  });
+  observer.observe(appShell || document.body, { childList: true, characterData: true, subtree: true });
 }
 
 function parseMinecraftVersionParts(version) {
@@ -487,13 +549,13 @@ function renderManagedServerStatus() {
     const players = Number(managed.playerCount || 0);
     const port = managed.port || (managed.address || "").split(":")[1] || "25565";
     const localAddress = managed.localAddress || "this PC";
-    managedServerStatus.textContent = `Running ${managed.address} on Paper ${managed.version}. Players: ${players}. Empty for ${Math.floor(idle / 60)}m ${idle % 60}s. Router forward target: TCP ${port} -> ${localAddress}:${port}.`;
+    managedServerStatus.textContent = `Running ${managed.address} on Paper ${managed.version}. Players: ${players}. Empty for ${Math.floor(idle / 60)}m ${idle % 60}s. Router target: TCP ${port} -> ${localAddress}:${port}. If friends time out, click Fix firewall/router.`;
   } else if (managed.state === "stopping") {
     managedServerStatus.textContent = "Server is stopping...";
   } else if (profile?.authorized) {
     const port = (profile.address || "").includes(":") ? (profile.address || "").split(":").pop() : "25565";
     const localAddress = managed.localAddress || serverPluginState.managedServer?.localAddress || "this PC";
-    managedServerStatus.textContent = `Ready. Plugins folder: ${profile.pluginsDir}. If friends time out, forward TCP ${port} to ${localAddress}:${port}.`;
+    managedServerStatus.textContent = `Ready. Plugins folder: ${profile.pluginsDir}. If friends time out, click Fix firewall/router, then forward TCP ${port} to ${localAddress}:${port} if your router blocks UPnP.`;
   } else {
     managedServerStatus.textContent = "Authorize a server, then start it here to load plugins.";
   }
@@ -941,7 +1003,7 @@ openManagedServerFirewallButton.addEventListener("click", async () => {
     const result = await window.aeroApi.openManagedServerFirewall({ address: serverPluginAddress.value });
     serverPluginState = await window.aeroApi.getServerPluginsState();
     renderServerPluginAuth();
-    statusText.textContent = `Approve the Windows prompt. Then forward TCP ${result.port} to ${result.localAddress}:${result.port} in your router.`;
+    statusText.textContent = result.message || `Approve the Windows prompt. If friends still time out, forward TCP ${result.port} to ${result.localAddress}:${result.port} in your router.`;
   } catch (error) {
     statusText.textContent = `Problem: ${error.message}`;
   } finally {
@@ -1601,6 +1663,7 @@ window.aeroApi.onClosed(({ code }) => {
 
 async function boot() {
   startLoadingSequence();
+  initReadableNumberFonts();
   seedBambooField();
   state = await window.aeroApi.getState();
   syncFromState(state);

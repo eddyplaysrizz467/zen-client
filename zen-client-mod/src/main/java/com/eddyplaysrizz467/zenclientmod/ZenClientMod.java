@@ -7,7 +7,9 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
+import java.net.ServerSocket;
 import java.net.URI;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -82,6 +84,7 @@ public final class ZenClientMod implements ClientModInitializer {
   private static final int FULLBRIGHT_NIGHT_VISION_DURATION = 1_000_000;
   private static final int MIN_SAFE_RENDER_DISTANCE = 6;
   private static final int MIN_SAFE_SIMULATION_DISTANCE = 5;
+  private static final int PREFERRED_LAN_PORT = 25565;
   private static final int HUD_BOX_PADDING = 4;
   private static final int HUD_BOX_HEIGHT = 18;
   private static final int HUD_BOX_GAP = 4;
@@ -212,7 +215,7 @@ public final class ZenClientMod implements ClientModInitializer {
       return;
     }
 
-    int port = HttpUtil.getAvailablePort();
+    int port = preferredLanPort();
     boolean published = server.publishServer(GameType.SURVIVAL, false, port);
     if (published) {
       showZenToast(client, "Zen LAN is open", "Port " + server.getPort());
@@ -265,6 +268,21 @@ public final class ZenClientMod implements ClientModInitializer {
     return host + ":" + port;
   }
 
+  private static int preferredLanPort() {
+    if (isPortAvailable(PREFERRED_LAN_PORT)) return PREFERRED_LAN_PORT;
+    return HttpUtil.getAvailablePort();
+  }
+
+  private static boolean isPortAvailable(int port) {
+    try (ServerSocket socket = new ServerSocket()) {
+      socket.setReuseAddress(false);
+      socket.bind(new InetSocketAddress("0.0.0.0", port));
+      return true;
+    } catch (Exception ignored) {
+      return false;
+    }
+  }
+
   static String bestLocalIp() {
     try {
       for (NetworkInterface networkInterface : Collections.list(NetworkInterface.getNetworkInterfaces())) {
@@ -287,7 +305,7 @@ public final class ZenClientMod implements ClientModInitializer {
     String localInvite = buildInviteAddress(localIp, port);
     String ownerCode = ownerCodeForInvite(localInvite);
     sendPlayerMessage(client, "Zen LAN is open. Looking up your real public address...");
-    sendPlayerMessage(client, "If outside friends time out or get getsockopt/refused, your router or Windows Firewall is blocking this port.");
+    sendPlayerMessage(client, "If outside friends time out or get getsockopt/refused, use Zen Client's Fix firewall/router button for this address.");
 
     Thread publicIpThread = new Thread(() -> {
       String publicIp = fetchPublicIp();
@@ -311,7 +329,7 @@ public final class ZenClientMod implements ClientModInitializer {
           .append(copyableText(ownerCode, "Click to copy server plugin code")));
         sendPlayerMessage(client, "To load plugins, authorize this server in Zen Client, install plugins, then press Start managed server.");
         sendPlayerMessage(client, "When the managed server is running, type /restart to restart it with the same plugins.");
-        sendPlayerMessage(client, "This public address only works from outside your Wi-Fi if TCP port " + port + " is forwarded to the router target above and Java/Minecraft is allowed through Windows Firewall.");
+        sendPlayerMessage(client, "This public address works from outside your Wi-Fi only when TCP port " + port + " is allowed through Windows Firewall and forwarded to the router target above.");
         CONFIG.saveFriendServer("My public hosted world", publicInvite);
       });
     }, "Zen LAN public IP lookup");
