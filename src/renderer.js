@@ -510,6 +510,10 @@ function currentServerPluginProfile() {
   return (serverPluginState.servers || []).find((server) => String(server.address || "").toLowerCase() === address) || null;
 }
 
+function hasServerPluginAddress() {
+  return Boolean(String(serverPluginAddress?.value || "").trim());
+}
+
 function renderServerPluginInstalled() {
   if (!serverPluginInstalledList) return;
   const profile = currentServerPluginProfile();
@@ -556,12 +560,16 @@ function renderManagedServerStatus() {
     const port = (profile.address || "").includes(":") ? (profile.address || "").split(":").pop() : "25565";
     const localAddress = managed.localAddress || serverPluginState.managedServer?.localAddress || "this PC";
     managedServerStatus.textContent = `Ready. Plugins folder: ${profile.pluginsDir}. If friends time out, click Fix firewall/router, then forward TCP ${port} to ${localAddress}:${port} if your router blocks UPnP.`;
+  } else if (hasServerPluginAddress()) {
+    const port = serverPluginAddress.value.includes(":") ? serverPluginAddress.value.split(":").pop() : "25565";
+    const localAddress = managed.localAddress || serverPluginState.managedServer?.localAddress || "this PC";
+    managedServerStatus.textContent = `LAN helper ready. Click Fix firewall/router to allow TCP ${port} on this PC and try router mapping to ${localAddress}:${port}.`;
   } else {
-    managedServerStatus.textContent = "Authorize a server, then start it here to load plugins.";
+    managedServerStatus.textContent = "Paste the outside-Wi-Fi address from Minecraft to fix firewall/router, or authorize it to install plugins.";
   }
 
   if (openServerPluginsFolderButton) openServerPluginsFolderButton.disabled = busy || !profile?.authorized;
-  if (openManagedServerFirewallButton) openManagedServerFirewallButton.disabled = busy || !profile?.authorized;
+  if (openManagedServerFirewallButton) openManagedServerFirewallButton.disabled = busy || !hasServerPluginAddress();
   if (startManagedServerButton) startManagedServerButton.disabled = busy || !profile?.authorized || (running && isCurrent);
   if (restartManagedServerButton) restartManagedServerButton.disabled = busy || !profile?.authorized;
   if (stopManagedServerButton) stopManagedServerButton.disabled = busy || !running;

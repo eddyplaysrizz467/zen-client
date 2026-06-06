@@ -1953,14 +1953,15 @@ async function restartManagedServer(address) {
 }
 
 async function openManagedServerFirewall(address) {
-  const profile = requireAuthorizedServer(address || managedServer?.address);
+  importMinecraftServerCodes();
+  const targetAddress = assertServerAddress(address || managedServer?.address);
   const version = managedServer?.version || managedServerVersion();
-  const port = parseServerPort(profile.address);
+  const port = parseServerPort(targetAddress);
   const state = loadState();
   const javaPath = await findJavaExecutable(state.settings?.javaPath, state.settings?.minecraftDirectory || DEFAULT_ROOT, version);
   const localAddress = bestLocalIpv4();
   const scriptPath = path.join(APP_DIR, "open-managed-server-firewall.ps1");
-  const ruleName = `Zen Client Managed Server ${port}`;
+  const ruleName = `Zen Client Minecraft Server ${port}`;
   const script = [
     "$ErrorActionPreference = 'Stop'",
     `$port = ${port}`,
@@ -2000,7 +2001,7 @@ async function openManagedServerFirewall(address) {
   ], { encoding: "utf8" });
   if (result.status !== 0) throw new Error(result.stderr || result.stdout || "Could not open the Windows Firewall prompt.");
 
-  appendLog(`[server] Requested Windows Firewall rules for TCP port ${port}.`);
+  appendLog(`[server] Requested Windows Firewall/router helper for ${targetAddress} -> ${localAddress}:${port}.`);
   return {
     port,
     localAddress,
