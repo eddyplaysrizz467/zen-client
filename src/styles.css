@@ -1161,6 +1161,20 @@ input::placeholder {
   letter-spacing: 0.16em;
 }
 
+.playit-output {
+  min-height: 5.5rem;
+  max-height: 11rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 0.75rem;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(145, 231, 153, 0.18);
+  background: rgba(0, 0, 0, 0.24);
+  color: var(--accent-strong);
+  font: 0.8rem/1.35 "Consolas", "Courier New", monospace;
+}
+
 .friends-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));

@@ -24,6 +24,11 @@ const OPTIMIZATION_HISTORY_FILE = path.join(OPTIMIZATION_DIR, "history.log");
 const SERVER_WORKSPACE_DIR = path.join(APP_DIR, "servers");
 const SERVER_PLUGIN_CODE_FILE = path.join(APP_DIR, "server-plugin-codes.json");
 const SERVER_CONTROL_REQUEST_FILE = path.join(APP_DIR, "server-control-request.json");
+const PLAYIT_AGENT_URL = "https://github.com/playit-cloud/playit-agent/releases/download/v1.0.8/playit-windows-x86_64-signed.exe";
+const PLAYIT_DIR = path.join(APP_DIR, "playit");
+const PLAYIT_AGENT_PATH = path.join(PLAYIT_DIR, "playit.exe");
+const PLAYIT_SECRET_PATH = path.join(PLAYIT_DIR, "agent-secret.toml");
+const PLAYIT_LOG_PATH = path.join(PLAYIT_DIR, "playit.log");
 const DEFAULT_DISCORD_APP_ID = "1496668054803714058";
 const ZEN_CLIENT_BUNDLE_MANIFEST_FILENAME = "zen-client-bundles.json";
 const ZEN_CLIENT_MOD_FILENAME = "zen-client-fabric.jar";
@@ -65,6 +70,11 @@ let currentLaunchContext = null;
 let managedServer = null;
 let serverControlPollTimer = null;
 let lastServerControlRequestId = "";
+let playitAgent = null;
+let playitLines = [];
+let playitClaimUrl = "";
+let playitPublicAddress = "";
+let playitLastError = "";
 let logBuffer = [];
 let updatePollTimer = null;
 let currentUpdateState = {
@@ -1513,6 +1523,100 @@ function getManagedServerStatus() {
   };
 }
 
+function getPlayitTunnelStatus() {
+  return {
+    installed: fs.existsSync(PLAYIT_AGENT_PATH),
+    running: Boolean(playitAgent && !playitAgent.killed),
+    claimUrl: playitClaimUrl,
+    publicAddress: playitPublicAddress,
+    lastError: playitLastError,
+    lines: playitLines.slice(-12)
+  };
+}
+
+function rememberPlayitLine(rawLine) {
+  const line = String(rawLine || "").trim();
+  if (!line) return;
+  playitLines.push(line);
+  if (playitLines.length > 80) playitLines = playitLines.slice(-80);
+
+  const urlMatch = line.match(/https?:\/\/\S+/i);
+  if (urlMatch && /playit\.gg|ply\.gg/i.test(urlMatch[0])) {
+    playitClaimUrl = urlMatch[0].replace(/[),.;]+$/, "");
+  }
+
+  const addressMatch = line.match(/\b([a-z0-9.-]+\.(?:playit\.gg|ply\.gg)(?::\d+)?)\b/i);
+  if (addressMatch) {
+    playitPublicAddress = addressMatch[1];
+  }
+
+  appendLog(`[playit] ${line}`);
+  sendEvent("state-updated", getClientState());
+}
+
+async function ensurePlayitAgent() {
+  ensureDir(PLAYIT_DIR);
+  if (fs.existsSync(PLAYIT_AGENT_PATH)) return PLAYIT_AGENT_PATH;
+
+  appendLog("[playit] Downloading Playit tunnel agent...");
+  const response = await fetch(PLAYIT_AGENT_URL);
+  if (!response.ok) throw new Error(`Could not download Playit agent (${response.status}).`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  fs.writeFileSync(PLAYIT_AGENT_PATH, bytes);
+  appendLog(`[playit] Installed agent at ${PLAYIT_AGENT_PATH}`);
+  return PLAYIT_AGENT_PATH;
+}
+
+async function startPlayitTunnel() {
+  if (playitAgent && !playitAgent.killed) return getPlayitTunnelStatus();
+  const agentPath = await ensurePlayitAgent();
+  playitLastError = "";
+  playitLines = [];
+  playitClaimUrl = "";
+  playitPublicAddress = "";
+
+  playitAgent = spawn(agentPath, [
+    "--secret-path",
+    PLAYIT_SECRET_PATH,
+    "--log-path",
+    PLAYIT_LOG_PATH
+  ], {
+    cwd: PLAYIT_DIR,
+    windowsHide: true
+  });
+
+  playitAgent.stdout?.on("data", (chunk) => {
+    String(chunk).split(/\r?\n/).forEach(rememberPlayitLine);
+  });
+  playitAgent.stderr?.on("data", (chunk) => {
+    String(chunk).split(/\r?\n/).forEach(rememberPlayitLine);
+  });
+  playitAgent.on("error", (error) => {
+    playitLastError = error.message || String(error);
+    appendLog(`[playit] Agent error: ${playitLastError}`);
+    sendEvent("state-updated", getClientState());
+  });
+  playitAgent.on("exit", (code) => {
+    appendLog(`[playit] Agent stopped with exit code ${code}.`);
+    playitAgent = null;
+    sendEvent("state-updated", getClientState());
+  });
+
+  appendLog("[playit] Agent started. If this is the first run, use the claim link it prints.");
+  sendEvent("state-updated", getClientState());
+  return getPlayitTunnelStatus();
+}
+
+function stopPlayitTunnel() {
+  if (playitAgent && !playitAgent.killed) {
+    playitAgent.kill();
+  }
+  playitAgent = null;
+  appendLog("[playit] Agent stop requested.");
+  sendEvent("state-updated", getClientState());
+  return getPlayitTunnelStatus();
+}
+
 function bestLocalIpv4() {
   const interfaces = os.networkInterfaces();
   for (const entries of Object.values(interfaces)) {
@@ -1532,7 +1636,8 @@ function getServerPluginsState() {
     servers: Array.isArray(state.serverPlugins?.servers)
       ? state.serverPlugins.servers.map(sanitizeServerPluginRecord).filter((server) => server.address)
       : [],
-    managedServer: getManagedServerStatus()
+    managedServer: getManagedServerStatus(),
+    playitTunnel: getPlayitTunnelStatus()
   };
 }
 
@@ -3477,6 +3582,8 @@ ipcMain.handle("serverPlugins:openFirewall", async (_event, payload) => openMana
 ipcMain.handle("serverPlugins:startManaged", async (_event, payload) => startManagedServer(payload?.address));
 ipcMain.handle("serverPlugins:stopManaged", async () => stopManagedServer("manual"));
 ipcMain.handle("serverPlugins:restartManaged", async (_event, payload) => restartManagedServer(payload?.address));
+ipcMain.handle("serverPlugins:playitStart", async () => startPlayitTunnel());
+ipcMain.handle("serverPlugins:playitStop", async () => stopPlayitTunnel());
 ipcMain.handle("account:microsoftLogin", async () => {
   const account = await microsoftSignIn();
   return {

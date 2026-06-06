@@ -72,6 +72,10 @@ const openManagedServerFirewallButton = document.getElementById("openManagedServ
 const startManagedServerButton = document.getElementById("startManagedServerButton");
 const restartManagedServerButton = document.getElementById("restartManagedServerButton");
 const stopManagedServerButton = document.getElementById("stopManagedServerButton");
+const playitTunnelStatus = document.getElementById("playitTunnelStatus");
+const playitTunnelOutput = document.getElementById("playitTunnelOutput");
+const startPlayitTunnelButton = document.getElementById("startPlayitTunnelButton");
+const stopPlayitTunnelButton = document.getElementById("stopPlayitTunnelButton");
 
 const microsoftButton = document.getElementById("microsoftButton");
 const removeAccountButton = document.getElementById("removeAccountButton");
@@ -131,7 +135,9 @@ function setBusy(nextBusy) {
     openManagedServerFirewallButton,
     startManagedServerButton,
     restartManagedServerButton,
-    stopManagedServerButton
+    stopManagedServerButton,
+    startPlayitTunnelButton,
+    stopPlayitTunnelButton
   ].forEach((button) => {
     if (button) button.disabled = nextBusy;
   });
@@ -575,6 +581,34 @@ function renderManagedServerStatus() {
   if (stopManagedServerButton) stopManagedServerButton.disabled = busy || !running;
 }
 
+function renderPlayitTunnelStatus() {
+  const tunnel = serverPluginState.playitTunnel || {};
+  const running = Boolean(tunnel.running);
+  if (playitTunnelStatus) {
+    if (running && tunnel.publicAddress) {
+      playitTunnelStatus.textContent = `Running. Give friends this Playit address: ${tunnel.publicAddress}`;
+    } else if (running && tunnel.claimUrl) {
+      playitTunnelStatus.textContent = `Running. Claim this agent: ${tunnel.claimUrl}`;
+    } else if (running) {
+      playitTunnelStatus.textContent = "Running. Waiting for Playit to print the claim link or tunnel address...";
+    } else if (tunnel.lastError) {
+      playitTunnelStatus.textContent = `Stopped. ${tunnel.lastError}`;
+    } else {
+      playitTunnelStatus.textContent = "Use this when public IP hosting keeps timing out.";
+    }
+  }
+
+  if (playitTunnelOutput) {
+    const lines = Array.isArray(tunnel.lines) && tunnel.lines.length
+      ? tunnel.lines
+      : ["Tunnel output will appear here."];
+    playitTunnelOutput.textContent = lines.join("\n");
+  }
+
+  if (startPlayitTunnelButton) startPlayitTunnelButton.disabled = busy || running;
+  if (stopPlayitTunnelButton) stopPlayitTunnelButton.disabled = busy || !running;
+}
+
 function renderServerPluginAuth() {
   const profile = currentServerPluginProfile();
   if (!serverPluginAuthStatus) return;
@@ -589,6 +623,7 @@ function renderServerPluginAuth() {
   }
   renderServerPluginInstalled();
   renderManagedServerStatus();
+  renderPlayitTunnelStatus();
 }
 
 function serverPluginCard(item) {
@@ -1054,6 +1089,34 @@ stopManagedServerButton.addEventListener("click", async () => {
     serverPluginState = await window.aeroApi.getServerPluginsState();
     renderServerPluginAuth();
     statusText.textContent = "Managed server stopping.";
+  } catch (error) {
+    statusText.textContent = `Problem: ${error.message}`;
+  } finally {
+    setBusy(false);
+  }
+});
+
+startPlayitTunnelButton.addEventListener("click", async () => {
+  setBusy(true);
+  try {
+    await window.aeroApi.startPlayitTunnel();
+    serverPluginState = await window.aeroApi.getServerPluginsState();
+    renderServerPluginAuth();
+    statusText.textContent = "Playit tunnel starting. Use the claim link or tunnel address shown in Server Plugins.";
+  } catch (error) {
+    statusText.textContent = `Problem: ${error.message}`;
+  } finally {
+    setBusy(false);
+  }
+});
+
+stopPlayitTunnelButton.addEventListener("click", async () => {
+  setBusy(true);
+  try {
+    await window.aeroApi.stopPlayitTunnel();
+    serverPluginState = await window.aeroApi.getServerPluginsState();
+    renderServerPluginAuth();
+    statusText.textContent = "Playit tunnel stopped.";
   } catch (error) {
     statusText.textContent = `Problem: ${error.message}`;
   } finally {

@@ -46,6 +46,8 @@ contextBridge.exposeInMainWorld("aeroApi", {
   startManagedServer: (payload) => invoke("serverPlugins:startManaged", payload),
   stopManagedServer: () => invoke("serverPlugins:stopManaged"),
   restartManagedServer: (payload) => invoke("serverPlugins:restartManaged", payload),
+  startPlayitTunnel: () => invoke("serverPlugins:playitStart"),
+  stopPlayitTunnel: () => invoke("serverPlugins:playitStop"),
   microsoftLogin: () => invoke("account:microsoftLogin"),
   launchGame: (settings) => invoke("launch:start", settings),
   getSkinProfile: () => invoke("skin:getProfile"),

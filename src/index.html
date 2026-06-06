@@ -375,6 +375,17 @@
               <div class="hint">If friends time out, paste the outside-Wi-Fi address from Minecraft and use Fix firewall/router. If your router blocks UPnP, forward the shown TCP port to this PC in your router.</div>
               <div class="hint">In Minecraft, type <code>/restart</code> to restart this managed server with the same folder and plugins.</div>
             </div>
+
+            <div class="server-plugin-box">
+              <div class="library-title">Playit tunnel</div>
+              <div id="playitTunnelStatus" class="hint">Use this when public IP hosting keeps timing out.</div>
+              <div id="playitTunnelOutput" class="playit-output">Tunnel output will appear here.</div>
+              <div class="library-item-actions">
+                <button id="startPlayitTunnelButton" class="primary" type="button">Start Playit tunnel</button>
+                <button id="stopPlayitTunnelButton" class="ghost" type="button">Stop tunnel</button>
+              </div>
+              <div class="hint">First run: click the claim link, create a Minecraft Java tunnel to <code>127.0.0.1:25565</code>, then give friends the Playit address.</div>
+            </div>
           </div>
         </section>
       </div>
