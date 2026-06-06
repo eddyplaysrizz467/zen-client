@@ -143,6 +143,7 @@ public final class ZenClientMod implements ClientModInitializer {
   private static long aimAssistSuppressedUntil = 0L;
   private static String lastSessionOwnerAddress = "";
   private static String lastSessionOwnerCode = "";
+  private static String lastSessionLocalInvite = "";
   private static String lastSessionPublicInvite = "";
 
   private static final class ProjectedPoint {
@@ -239,6 +240,12 @@ public final class ZenClientMod implements ClientModInitializer {
 
   public static String currentPreferredInvite(Minecraft client) {
     if (!lastSessionPublicInvite.isBlank()) return lastSessionPublicInvite;
+    if (!lastSessionLocalInvite.isBlank()) return lastSessionLocalInvite;
+    return currentLanInvite(client);
+  }
+
+  public static String currentLocalInvite(Minecraft client) {
+    if (!lastSessionLocalInvite.isBlank()) return lastSessionLocalInvite;
     return currentLanInvite(client);
   }
 
@@ -255,7 +262,7 @@ public final class ZenClientMod implements ClientModInitializer {
     if (client == null) return;
     String address = inviteOrAddress == null ? "" : inviteOrAddress.trim();
     if (address.isBlank() || !ServerAddress.isValidAddress(address)) {
-      showStaticToast(client, "Zen Server", "Paste a public server address.");
+      showStaticToast(client, "Zen Server", "Paste a server address.");
       return;
     }
 
@@ -303,22 +310,27 @@ public final class ZenClientMod implements ClientModInitializer {
     lastSessionPublicInvite = "";
     String localIp = bestLocalIp();
     String localInvite = buildInviteAddress(localIp, port);
+    lastSessionLocalInvite = localInvite;
     String ownerCode = ownerCodeForInvite(localInvite);
-    sendPlayerMessage(client, "Zen LAN is open. Looking up your real public address...");
-    sendPlayerMessage(client, "If outside friends time out or get getsockopt/refused, use Zen Client's Fix firewall/router button for this address.");
+    sendPlayerMessage(client, "Zen LAN is open. Use the address that matches where the other player is connecting from.");
+    sendPlayerMessage(client, Component.literal("Same Wi-Fi Minecraft address: ")
+      .append(copyableText(localInvite, "Click to copy same-Wi-Fi address")));
+    sendPlayerMessage(client, "If a player is on your Wi-Fi, use the same-Wi-Fi address. Public IPs often hang forever from inside the same house.");
+    sendPlayerMessage(client, "Looking up the outside-Wi-Fi public address...");
+    CONFIG.saveFriendServer("My hosted world (same Wi-Fi)", localInvite);
 
     Thread publicIpThread = new Thread(() -> {
       String publicIp = fetchPublicIp();
       String publicInvite = buildInviteAddress(publicIp, port);
       client.execute(() -> {
         if (publicInvite.isBlank() || publicInvite.equals(localInvite)) {
-          sendPlayerMessage(client, "Zen could not find your real public address. Set up port forwarding/tunnel, then host again.");
+          sendPlayerMessage(client, "Zen could not find an outside-Wi-Fi public address. Same-Wi-Fi players can still use the local address above.");
           return;
         }
         lastSessionPublicInvite = publicInvite;
         String pluginsDir = writeServerPluginCodeBridge(publicInvite, ownerCode);
-        sendPlayerMessage(client, Component.literal("Real public Minecraft address: ")
-          .append(copyableText(publicInvite, "Click to copy public address")));
+        sendPlayerMessage(client, Component.literal("Outside-Wi-Fi Minecraft address: ")
+          .append(copyableText(publicInvite, "Click to copy outside-Wi-Fi public address")));
         if (!pluginsDir.isBlank()) {
           sendPlayerMessage(client, Component.literal("Server plugin folder: ")
             .append(copyableText(pluginsDir, "Click to copy plugin folder path")));
@@ -329,8 +341,8 @@ public final class ZenClientMod implements ClientModInitializer {
           .append(copyableText(ownerCode, "Click to copy server plugin code")));
         sendPlayerMessage(client, "To load plugins, authorize this server in Zen Client, install plugins, then press Start managed server.");
         sendPlayerMessage(client, "When the managed server is running, type /restart to restart it with the same plugins.");
-        sendPlayerMessage(client, "This public address works from outside your Wi-Fi only when TCP port " + port + " is allowed through Windows Firewall and forwarded to the router target above.");
-        CONFIG.saveFriendServer("My public hosted world", publicInvite);
+        sendPlayerMessage(client, "This outside-Wi-Fi address works only when TCP port " + port + " is allowed through Windows Firewall and forwarded to the router target above.");
+        CONFIG.saveFriendServer("My hosted world (outside Wi-Fi)", publicInvite);
       });
     }, "Zen LAN public IP lookup");
     publicIpThread.setDaemon(true);
@@ -704,6 +716,7 @@ public final class ZenClientMod implements ClientModInitializer {
     aimAssistTargetId = -1;
     aimAssistTargetExpiresAt = 0L;
     aimAssistSuppressedUntil = 0L;
+    lastSessionLocalInvite = "";
     lastSessionPublicInvite = "";
     ESP_ENTITY_IDS.clear();
     lastJumpDown = false;

@@ -65,36 +65,44 @@ public final class ZenFriendsScreen extends Screen {
     int visibleTop = ENTRY_TOP - 4;
     int visibleBottom = this.height - BOTTOM_PADDING - 8;
 
-    String invite = ZenClientMod.currentZenInviteCode(this.minecraft);
-    String realAddress = ZenClientMod.currentPreferredInvite(this.minecraft);
-    boolean hasInvite = !invite.isBlank();
+    String localAddress = ZenClientMod.currentLocalInvite(this.minecraft);
+    String outsideAddress = ZenClientMod.currentPublicInvite();
+    boolean hasLocalAddress = !localAddress.isBlank();
+    boolean hasOutsideAddress = !outsideAddress.isBlank();
+    boolean hasAnyAddress = hasLocalAddress || hasOutsideAddress;
 
     addRenderableWidget(ZenGreenButton.create(
-        Component.literal(hasInvite ? "Copy Address" : "No Public Address"),
-        button -> ZenClientMod.copyToClipboard(this.minecraft, ZenClientMod.currentZenInviteCode(this.minecraft)),
-        panelLeft + 18, TOP_PADDING, 116, 20)).active = hasInvite;
+        Component.literal(hasLocalAddress ? "Copy Wi-Fi" : "No Wi-Fi"),
+        button -> ZenClientMod.copyToClipboard(this.minecraft, ZenClientMod.currentLocalInvite(this.minecraft)),
+        panelLeft + 18, TOP_PADDING, 94, 20)).active = hasLocalAddress;
 
     addRenderableWidget(ZenGreenButton.create(
-        Component.literal("Copy Real IP"),
-        button -> ZenClientMod.copyToClipboard(this.minecraft, ZenClientMod.currentPreferredInvite(this.minecraft)),
-        panelLeft + 140, TOP_PADDING, 96, 20)).active = hasInvite && !realAddress.isBlank();
+        Component.literal(hasOutsideAddress ? "Copy Outside" : "No Outside"),
+        button -> ZenClientMod.copyToClipboard(this.minecraft, ZenClientMod.currentPublicInvite()),
+        panelLeft + 116, TOP_PADDING, 104, 20)).active = hasOutsideAddress;
 
     addRenderableWidget(ZenGreenButton.create(
         Component.literal("Save Host"),
         button -> {
-          String currentInvite = ZenClientMod.currentZenInviteCode(this.minecraft);
-          if (!currentInvite.isBlank()) {
-            ZenClientMod.config().saveFriendServer("My hosted world", currentInvite);
+          String currentLocal = ZenClientMod.currentLocalInvite(this.minecraft);
+          String currentOutside = ZenClientMod.currentPublicInvite();
+          if (!currentLocal.isBlank()) {
+            ZenClientMod.config().saveFriendServer("My hosted world (same Wi-Fi)", currentLocal);
+          }
+          if (!currentOutside.isBlank()) {
+            ZenClientMod.config().saveFriendServer("My hosted world (outside Wi-Fi)", currentOutside);
+          }
+          if (!currentLocal.isBlank() || !currentOutside.isBlank()) {
             rebuildEntries();
             rebuildFriendWidgets();
           }
         },
-        panelLeft + 238, TOP_PADDING, 86, 20)).active = hasInvite;
+        panelLeft + 224, TOP_PADDING, 86, 20)).active = hasAnyAddress;
 
     addRenderableWidget(ZenGreenButton.create(Component.literal("Back"), button -> this.minecraft.setScreen(parent), panelRight - 88, TOP_PADDING, 70, 20));
 
     inviteBox = new EditBox(this.font, panelLeft + 18, TOP_PADDING + 28, PANEL_WIDTH - 116, 20, Component.literal("Zen invite"));
-    inviteBox.setHint(Component.literal("Paste public server address"));
+    inviteBox.setHint(Component.literal("Paste server address"));
     inviteBox.setValue(typedInvite);
     addRenderableWidget(inviteBox);
 
@@ -131,12 +139,19 @@ public final class ZenFriendsScreen extends Screen {
     ZenTheme.renderPanel(context, panelLeft, panelTop, panelRight, panelBottom);
     ZenTheme.drawCenteredOutlinedString(context, this.font, this.title, this.width / 2, panelTop + 12, ZenTheme.WHITE, 0xFF063711);
 
-    String invite = ZenClientMod.currentZenInviteCode(this.minecraft);
-    String inviteText = invite.isBlank() ? "Open a singleplayer world and press Host Zen LAN first." : "Current public address: " + invite;
-    ZenTheme.drawOutlinedString(context, this.font, Component.literal(inviteText), panelLeft + 18, 54, invite.isBlank() ? ZenTheme.TEXT_MUTED : 0xFFBFFFD2, 0xFF063711);
+    String localAddress = ZenClientMod.currentLocalInvite(this.minecraft);
+    String outsideAddress = ZenClientMod.currentPublicInvite();
+    if (localAddress.isBlank() && outsideAddress.isBlank()) {
+      ZenTheme.drawOutlinedString(context, this.font, Component.literal("Open a singleplayer world and press Host Zen LAN first."), panelLeft + 18, 54, ZenTheme.TEXT_MUTED, 0xFF063711);
+    } else {
+      String localText = localAddress.isBlank() ? "Same Wi-Fi: not open yet" : "Same Wi-Fi: " + localAddress;
+      String outsideText = outsideAddress.isBlank() ? "Outside Wi-Fi: still checking" : "Outside Wi-Fi: " + outsideAddress;
+      ZenTheme.drawOutlinedString(context, this.font, Component.literal(localText), panelLeft + 18, 50, 0xFFBFFFD2, 0xFF063711);
+      ZenTheme.drawOutlinedString(context, this.font, Component.literal(outsideText), panelLeft + 18, 62, outsideAddress.isBlank() ? ZenTheme.TEXT_MUTED : 0xFFBFFFD2, 0xFF063711);
+    }
 
     if (entries.isEmpty()) {
-      ZenTheme.drawCenteredOutlinedString(context, this.font, Component.literal("Saved public server addresses will show here."), this.width / 2, TOP_PADDING + 78, ZenTheme.TEXT_MUTED, 0xFF063711);
+      ZenTheme.drawCenteredOutlinedString(context, this.font, Component.literal("Saved server addresses will show here."), this.width / 2, TOP_PADDING + 78, ZenTheme.TEXT_MUTED, 0xFF063711);
     } else {
       for (Entry entry : entries) {
         int y = entry.baseY - scrollOffset;

@@ -761,6 +761,9 @@ function zenIconDataUrl() {
 
 function formatInvokeError(error) {
   if (!error) return "Unknown error";
+  if (isMinecraftAuthLoginError(error)) {
+    return "Microsoft session refresh failed. Click 'Sign in with Microsoft' again, then launch.";
+  }
   if (typeof error === "string") return error;
   if (error instanceof Error) return error.message || String(error);
   if (typeof error === "object") {
@@ -778,6 +781,22 @@ function formatInvokeError(error) {
     }
   }
   return String(error);
+}
+
+function isMinecraftAuthLoginError(error) {
+  if (!error) return false;
+  if (typeof error === "string") return error.includes("error.auth.minecraft.login");
+  if (typeof error === "object") {
+    if (error.ts === "error.auth.minecraft.login") return true;
+    if (typeof error.message === "string" && error.message.includes("error.auth.minecraft.login")) return true;
+    if (typeof error.error === "string" && error.error.includes("error.auth.minecraft.login")) return true;
+    try {
+      return JSON.stringify(error).includes("error.auth.minecraft.login");
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 
 function launcherWindowBounds() {
@@ -2203,6 +2222,20 @@ function normalizeLaunchAuthorization(token) {
   };
 }
 
+function tokenExpiryMs(token) {
+  const raw = token?.meta?.exp || token?.exp || 0;
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return numeric < 10_000_000_000 ? numeric * 1000 : numeric;
+}
+
+function isLaunchAuthUsable(token, minRemainingMs = 10 * 60 * 1000) {
+  if (!token?.access_token || !token?.uuid || !token?.name) return false;
+  const expiresAt = tokenExpiryMs(token);
+  if (!expiresAt) return isRecentTimestamp(token?.validatedAt, AUTH_CACHE_MAX_AGE_MS);
+  return expiresAt - Date.now() > minRemainingMs;
+}
+
 async function verifyMinecraftProfile(accessToken) {
   const response = await fetch("https://api.minecraftservices.com/minecraft/profile", {
     headers: {
@@ -2252,18 +2285,37 @@ async function microsoftSignIn() {
 
 async function resolveAuth(account) {
   if (account.type === "microsoft") {
+    const cachedLaunchAuth = account.cachedLaunchAuth
+      ? normalizeLaunchAuthorization(account.cachedLaunchAuth)
+      : null;
+
     if (
-      account.cachedLaunchAuth &&
-      account.cachedLaunchAuth.access_token &&
+      cachedLaunchAuth &&
+      isLaunchAuthUsable(cachedLaunchAuth) &&
       isRecentTimestamp(account.cachedLaunchAuthValidatedAt, AUTH_CACHE_MAX_AGE_MS)
     ) {
       appendLog(`[microsoft] Using recent saved session for ${account.username}`);
-      return normalizeLaunchAuthorization(account.cachedLaunchAuth);
+      return cachedLaunchAuth;
     }
 
-    const auth = new Auth("select_account");
-    const minecraft = await tokenUtils.fromMclcToken(auth, account.mclcToken, true);
-    const refreshedToken = minecraft.mclc(true);
+    if (cachedLaunchAuth && isLaunchAuthUsable(cachedLaunchAuth)) {
+      appendLog(`[microsoft] Using saved session for ${account.username}`);
+      return cachedLaunchAuth;
+    }
+
+    let refreshedToken = null;
+    try {
+      const auth = new Auth("select_account");
+      const minecraft = await tokenUtils.fromMclcToken(auth, account.mclcToken, true);
+      refreshedToken = minecraft.mclc(true);
+    } catch (error) {
+      if (cachedLaunchAuth && isLaunchAuthUsable(cachedLaunchAuth, 0)) {
+        appendLog(`[microsoft] Refresh failed, using saved session for ${account.username}.`);
+        return cachedLaunchAuth;
+      }
+      throw new Error(`Microsoft session expired or failed to refresh. Click 'Sign in with Microsoft' again. (${formatInvokeError(error)})`);
+    }
+
     const launchAuth = normalizeLaunchAuthorization(refreshedToken);
     let profileOk = false;
     try {
@@ -2272,6 +2324,10 @@ async function resolveAuth(account) {
       profileOk = false;
     }
     if (!profileOk) {
+      if (cachedLaunchAuth && isLaunchAuthUsable(cachedLaunchAuth, 0)) {
+        appendLog(`[microsoft] Refreshed session could not be verified, using saved session for ${account.username}.`);
+        return cachedLaunchAuth;
+      }
       appendLog("[microsoft] Session looked stale. Requesting a fresh Microsoft sign-in...");
       const refreshedAccount = await interactiveMicrosoftSignIn(account.id);
       return normalizeLaunchAuthorization(refreshedAccount.mclcToken);
