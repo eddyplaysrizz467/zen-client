@@ -14,8 +14,8 @@ public final class ZenFriendsScreen extends Screen {
   private static final int PANEL_WIDTH = 430;
   private static final int ROW_HEIGHT = 32;
   private static final int SCROLL_STEP = 24;
-  private static final int TOP_PADDING = 74;
-  private static final int ENTRY_TOP = TOP_PADDING + 62;
+  private static final int TOP_PADDING = 82;
+  private static final int ENTRY_TOP = TOP_PADDING + 70;
   private static final int BOTTOM_PADDING = 48;
 
   private final Screen parent;
@@ -149,6 +149,7 @@ public final class ZenFriendsScreen extends Screen {
       ZenTheme.drawOutlinedString(context, this.font, Component.literal(localText), panelLeft + 18, 50, 0xFFBFFFD2, 0xFF063711);
       ZenTheme.drawOutlinedString(context, this.font, Component.literal(outsideText), panelLeft + 18, 62, outsideAddress.isBlank() ? ZenTheme.TEXT_MUTED : 0xFFBFFFD2, 0xFF063711);
     }
+    ZenTheme.drawOutlinedString(context, this.font, Component.literal("Far-away worlds need the host to share a Playit address or port-forward the shown TCP port."), panelLeft + 18, 76, ZenTheme.TEXT_MUTED, 0xFF063711);
 
     if (entries.isEmpty()) {
       ZenTheme.drawCenteredOutlinedString(context, this.font, Component.literal("Saved server addresses will show here."), this.width / 2, TOP_PADDING + 78, ZenTheme.TEXT_MUTED, 0xFF063711);

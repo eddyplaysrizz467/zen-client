@@ -559,19 +559,19 @@ function renderManagedServerStatus() {
     const players = Number(managed.playerCount || 0);
     const port = managed.port || (managed.address || "").split(":")[1] || "25565";
     const localAddress = managed.localAddress || "this PC";
-    managedServerStatus.textContent = `Running ${managed.address} on Paper ${managed.version}. Players: ${players}. Empty for ${Math.floor(idle / 60)}m ${idle % 60}s. Router target: TCP ${port} -> ${localAddress}:${port}. If friends time out, click Fix firewall/router.`;
+    managedServerStatus.textContent = `Running ${managed.address} on Paper ${managed.version}. Players: ${players}. Empty for ${Math.floor(idle / 60)}m ${idle % 60}s. Far-away friends need Playit or router target TCP ${port} -> ${localAddress}:${port}.`;
   } else if (managed.state === "stopping") {
     managedServerStatus.textContent = "Server is stopping...";
   } else if (profile?.authorized) {
     const port = (profile.address || "").includes(":") ? (profile.address || "").split(":").pop() : "25565";
     const localAddress = managed.localAddress || serverPluginState.managedServer?.localAddress || "this PC";
-    managedServerStatus.textContent = `Ready. Plugins folder: ${profile.pluginsDir}. If friends time out, click Fix firewall/router, then forward TCP ${port} to ${localAddress}:${port} if your router blocks UPnP.`;
+    managedServerStatus.textContent = `Ready. Plugins folder: ${profile.pluginsDir}. If friends are far away, use the Playit tunnel or forward TCP ${port} to ${localAddress}:${port}.`;
   } else if (hasServerPluginAddress()) {
     const port = serverPluginAddress.value.includes(":") ? serverPluginAddress.value.split(":").pop() : "25565";
     const localAddress = managed.localAddress || serverPluginState.managedServer?.localAddress || "this PC";
-    managedServerStatus.textContent = `LAN helper ready. Click Fix firewall/router to allow TCP ${port} on this PC and try router mapping to ${localAddress}:${port}.`;
+    managedServerStatus.textContent = `LAN helper ready. Same-Wi-Fi players can use the local address. Far-away friends need Playit or router mapping TCP ${port} to ${localAddress}:${port}.`;
   } else {
-    managedServerStatus.textContent = "Paste the outside-Wi-Fi address from Minecraft to fix firewall/router, or authorize it to install plugins.";
+    managedServerStatus.textContent = "Paste the outside-Wi-Fi address from Minecraft to manage plugins. For far-away friends, start Playit unless your router is port-forwarded.";
   }
 
   if (openServerPluginsFolderButton) openServerPluginsFolderButton.disabled = busy || !profile?.authorized;
@@ -594,7 +594,7 @@ function renderPlayitTunnelStatus() {
     } else if (tunnel.lastError) {
       playitTunnelStatus.textContent = `Stopped. ${tunnel.lastError}`;
     } else {
-      playitTunnelStatus.textContent = "Use this when public IP hosting keeps timing out.";
+      playitTunnelStatus.textContent = "Required for most far-away friends unless the host router is already port-forwarded.";
     }
   }
 

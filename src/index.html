@@ -312,7 +312,7 @@
           <div class="card server-plugins-card">
             <div class="card-head">
               <h2>Server Plugins</h2>
-              <p>Host from Minecraft, copy the one-time code Zen prints in chat, then install high-use Paper/Spigot plugins into that server profile.</p>
+              <p>Host from Minecraft, copy the one-time code Zen prints in chat, then install high-use Paper/Spigot plugins. Far-away friends need Playit or router port-forwarding.</p>
             </div>
 
             <div class="server-plugin-grid">
@@ -372,19 +372,19 @@
                 <button id="restartManagedServerButton" class="ghost" type="button">Restart</button>
                 <button id="stopManagedServerButton" class="ghost" type="button">Stop</button>
               </div>
-              <div class="hint">If friends time out, paste the outside-Wi-Fi address from Minecraft and use Fix firewall/router. If your router blocks UPnP, forward the shown TCP port to this PC in your router.</div>
+              <div class="hint">Same-Wi-Fi friends use the local address from Minecraft. Far-away friends should use Playit, or the host must forward the shown TCP port to this PC in the router.</div>
               <div class="hint">In Minecraft, type <code>/restart</code> to restart this managed server with the same folder and plugins.</div>
             </div>
 
             <div class="server-plugin-box">
               <div class="library-title">Playit tunnel</div>
-              <div id="playitTunnelStatus" class="hint">Use this when public IP hosting keeps timing out.</div>
+              <div id="playitTunnelStatus" class="hint">Required for most far-away friends unless the host router is already port-forwarded.</div>
               <div id="playitTunnelOutput" class="playit-output">Tunnel output will appear here.</div>
               <div class="library-item-actions">
                 <button id="startPlayitTunnelButton" class="primary" type="button">Start Playit tunnel</button>
                 <button id="stopPlayitTunnelButton" class="ghost" type="button">Stop tunnel</button>
               </div>
-              <div class="hint">First run: click the claim link, create a Minecraft Java tunnel to <code>127.0.0.1:25565</code>, then give friends the Playit address.</div>
+              <div class="hint">First run: click the claim link, create a Minecraft Java tunnel to <code>127.0.0.1:25565</code>, then give friends the Playit address instead of the public IP.</div>
             </div>
           </div>
         </section>

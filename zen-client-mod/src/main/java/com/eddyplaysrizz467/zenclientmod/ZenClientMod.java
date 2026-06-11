@@ -10,6 +10,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.net.URI;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -266,8 +267,128 @@ public final class ZenClientMod implements ClientModInitializer {
       return;
     }
 
+    if (shouldPreflightAddress(address)) {
+      showStaticToast(client, "Zen Server", "Checking if the host is reachable...");
+      Thread checkThread = new Thread(() -> {
+        ReachabilityResult result = checkReachability(address);
+        client.execute(() -> {
+          if (!result.reachable) {
+            showStaticToast(client, "Zen Server", "That host is not reachable right now.");
+            sendStaticPlayerMessage(client, "Zen could not reach " + address + ". The host must keep the world open and share a Playit address, or port-forward that exact TCP port.");
+            if (isPlainPublicAddress(address)) {
+              sendStaticPlayerMessage(client, "Plain public IPs usually time out for far-away friends unless the host router forwards the port. Ask the host for their Playit tunnel address instead.");
+            }
+            return;
+          }
+          connectToServer(client, parent, address);
+        });
+      }, "Zen server reachability check");
+      checkThread.setDaemon(true);
+      checkThread.start();
+      return;
+    }
+
+    connectToServer(client, parent, address);
+  }
+
+  private static void connectToServer(Minecraft client, Screen parent, String address) {
     ServerData serverData = new ServerData("Zen Server", address, ServerData.Type.OTHER);
     ConnectScreen.startConnecting(parent, client, ServerAddress.parseString(address), serverData, false, null);
+  }
+
+  private static boolean shouldPreflightAddress(String address) {
+    return address != null && explicitPort(address) > 0;
+  }
+
+  private static ReachabilityResult checkReachability(String address) {
+    ServerEndpoint endpoint = parseEndpoint(address);
+    if (endpoint.host.isBlank() || endpoint.port <= 0) {
+      return new ReachabilityResult(true, "");
+    }
+
+    try (Socket socket = new Socket()) {
+      socket.connect(new InetSocketAddress(endpoint.host, endpoint.port), 2500);
+      return new ReachabilityResult(true, "");
+    } catch (Exception error) {
+      return new ReachabilityResult(false, error.getMessage() == null ? "Timed out" : error.getMessage());
+    }
+  }
+
+  private static ServerEndpoint parseEndpoint(String address) {
+    String trimmed = address == null ? "" : address.trim();
+    int port = explicitPort(trimmed);
+    if (port <= 0) port = 25565;
+
+    String host = trimmed;
+    if (trimmed.startsWith("[")) {
+      int close = trimmed.indexOf(']');
+      if (close > 0) host = trimmed.substring(1, close);
+    } else {
+      int colon = trimmed.lastIndexOf(':');
+      if (colon > 0 && colon < trimmed.length() - 1 && isInteger(trimmed.substring(colon + 1))) {
+        host = trimmed.substring(0, colon);
+      }
+    }
+    return new ServerEndpoint(host, port);
+  }
+
+  private static int explicitPort(String address) {
+    String trimmed = address == null ? "" : address.trim();
+    if (trimmed.isBlank()) return -1;
+
+    if (trimmed.startsWith("[")) {
+      int close = trimmed.indexOf(']');
+      if (close > 0 && close + 2 < trimmed.length() && trimmed.charAt(close + 1) == ':') {
+        return parsePort(trimmed.substring(close + 2));
+      }
+      return -1;
+    }
+
+    int colon = trimmed.lastIndexOf(':');
+    if (colon <= 0 || colon >= trimmed.length() - 1) return -1;
+    if (trimmed.indexOf(':') != colon) return -1;
+    return parsePort(trimmed.substring(colon + 1));
+  }
+
+  private static int parsePort(String rawPort) {
+    if (!isInteger(rawPort)) return -1;
+    int port = Integer.parseInt(rawPort);
+    return port > 0 && port <= 65535 ? port : -1;
+  }
+
+  private static boolean isInteger(String value) {
+    if (value == null || value.isBlank()) return false;
+    for (int i = 0; i < value.length(); i++) {
+      if (!Character.isDigit(value.charAt(i))) return false;
+    }
+    return true;
+  }
+
+  private static boolean isPlainPublicAddress(String address) {
+    ServerEndpoint endpoint = parseEndpoint(address);
+    String host = endpoint.host.toLowerCase(Locale.ROOT);
+    if (host.endsWith(".playit.gg") || host.endsWith(".ply.gg")) return false;
+    return isPublicIpv4(host);
+  }
+
+  private static final class ServerEndpoint {
+    private final String host;
+    private final int port;
+
+    private ServerEndpoint(String host, int port) {
+      this.host = host == null ? "" : host;
+      this.port = port;
+    }
+  }
+
+  private static final class ReachabilityResult {
+    private final boolean reachable;
+    private final String message;
+
+    private ReachabilityResult(boolean reachable, String message) {
+      this.reachable = reachable;
+      this.message = message == null ? "" : message;
+    }
   }
 
   static String buildInviteAddress(String host, int port) {
@@ -316,6 +437,7 @@ public final class ZenClientMod implements ClientModInitializer {
     sendPlayerMessage(client, Component.literal("Same Wi-Fi Minecraft address: ")
       .append(copyableText(localInvite, "Click to copy same-Wi-Fi address")));
     sendPlayerMessage(client, "If a player is on your Wi-Fi, use the same-Wi-Fi address. Public IPs often hang forever from inside the same house.");
+    sendPlayerMessage(client, "For friends outside your Wi-Fi, use Zen Client > Server Plugins > Start Playit tunnel unless your router is already port-forwarded.");
     sendPlayerMessage(client, "Looking up the outside-Wi-Fi public address...");
     CONFIG.saveFriendServer("My hosted world (same Wi-Fi)", localInvite);
 
@@ -342,6 +464,7 @@ public final class ZenClientMod implements ClientModInitializer {
         sendPlayerMessage(client, "To load plugins, authorize this server in Zen Client, install plugins, then press Start managed server.");
         sendPlayerMessage(client, "When the managed server is running, type /restart to restart it with the same plugins.");
         sendPlayerMessage(client, "This outside-Wi-Fi address works only when TCP port " + port + " is allowed through Windows Firewall and forwarded to the router target above.");
+        sendPlayerMessage(client, "If a far-away friend times out, start the Playit tunnel in the launcher and give them the Playit address instead of this public IP.");
         CONFIG.saveFriendServer("My hosted world (outside Wi-Fi)", publicInvite);
       });
     }, "Zen LAN public IP lookup");
