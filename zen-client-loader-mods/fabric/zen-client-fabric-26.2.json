@@ -1,0 +1,9 @@
+{
+  "minecraftVersion": "26.2",
+  "minecraftVersionRange": "=26.2",
+  "targetName": "zen-client-fabric.jar",
+  "requiredMods": [
+    "fabric-api"
+  ],
+  "notes": "Full Zen Client Fabric mod port for Minecraft 26.2."
+}

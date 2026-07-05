@@ -1,0 +1,9 @@
+{
+  "minecraftVersion": "26.2",
+  "minecraftVersionRange": "=26.2",
+  "targetName": "zen-client-quilt.jar",
+  "requiredMods": [
+    "fabric-api"
+  ],
+  "notes": "Full Zen Client 26.2 bundle using the Fabric-compatible build on Quilt."
+}
