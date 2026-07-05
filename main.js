@@ -35,6 +35,7 @@ const ZEN_CLIENT_MOD_FILENAME = "zen-client-fabric.jar";
 const ZEN_CLIENT_MOD_FILENAME_TEMPLATE = "zen-client-fabric-%VERSION%.jar";
 const ZEN_SETTINGS_MIN_MINECRAFT_VERSION = "1.21.1";
 const ZEN_SETTINGS_RELEASE_SERIES = [
+  "26.2",
   "1.21.11",
   "1.21.10",
   "1.21.9",
@@ -1121,7 +1122,10 @@ function versionMatchesSimpleRange(version, rangeText) {
 function isZenClientModSupportedMinecraftVersion(minecraftVersion) {
   const value = String(minecraftVersion || "").trim();
   if (!value) return false;
-  if (isModernMinecraftRelease(value)) return value.startsWith("1.") && compareMcVersions(value, ZEN_SETTINGS_MIN_MINECRAFT_VERSION) >= 0;
+  if (isModernMinecraftRelease(value)) {
+    if (value.startsWith("1.")) return compareMcVersions(value, ZEN_SETTINGS_MIN_MINECRAFT_VERSION) >= 0;
+    return ZEN_SETTINGS_RELEASE_SERIES.includes(value);
+  }
 
   const namedSnapshot = value.match(/^(\d+\.\d+(?:\.\d+)?)-(snapshot|pre|rc)-?\d+$/i);
   if (namedSnapshot) {
@@ -1227,9 +1231,9 @@ function getBundledZenBundleSourcePath(bundleSpec) {
 function getZenAutoInstallVersions(selectedVersion) {
   const selected = String(selectedVersion || "").trim();
   const versions = selected ? [selected] : [];
-  if (isModernMinecraftRelease(selected) && selected.startsWith("1.") && compareMcVersions(selected, ZEN_SETTINGS_MIN_MINECRAFT_VERSION) >= 0) {
+  if (isModernMinecraftRelease(selected) && isZenClientModSupportedMinecraftVersion(selected)) {
     for (const version of ZEN_SETTINGS_RELEASE_SERIES) {
-      if (compareMcVersions(version, ZEN_SETTINGS_MIN_MINECRAFT_VERSION) >= 0 && compareMcVersions(version, selected) <= 0) {
+      if (isZenClientModSupportedMinecraftVersion(version) && compareMcVersions(version, selected) <= 0) {
         versions.push(version);
       }
     }

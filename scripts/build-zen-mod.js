@@ -15,6 +15,8 @@ const bundleManifestPath = path.join(bundledDir, "zen-client-bundles.json");
 const SUPPORTED_LOADERS = new Set(["fabric", "quilt", "forge", "neoforge"]);
 const ZEN_SETTINGS_MIN_MINECRAFT_VERSION = "1.21.1";
 const ZEN_SETTINGS_CURRENT_MINECRAFT_VERSION = "1.21.11";
+const ZEN_SETTINGS_DROP_MINECRAFT_VERSION = "26.2";
+const ZEN_SETTINGS_DROP_LOADER_VERSION = "0.19.3";
 const ZEN_SETTINGS_LEGACY_FABRIC_API_VERSION = "0.116.12+1.21.1";
 const ZEN_SETTINGS_LEGACY_LOADER_VERSION = "0.16.14";
 
@@ -61,6 +63,52 @@ function pickJar(directory = libsDir) {
   return path.join(directory, files[0]);
 }
 
+function runJarCreate(sourceDir, outputPath) {
+  const result = spawnSync("jar", ["--create", "--file", outputPath, "-C", sourceDir, "."], {
+    cwd: root,
+    stdio: "inherit",
+    env: process.env
+  });
+
+  if (result.status !== 0) {
+    throw new Error(`Could not create compatibility jar ${outputPath}. Make sure a JDK is available on PATH or JAVA_HOME.`);
+  }
+}
+
+function buildFabricCompatBundle(target) {
+  const targetDir = path.join(stagingDir, `${target.key}-compat`);
+  fs.mkdirSync(targetDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(targetDir, "fabric.mod.json"),
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        id: "zen_client_mod",
+        version: "0.1.0",
+        name: "Zen Client Mod",
+        description: "Zen Client compatibility bundle for Minecraft versions without published mappings.",
+        environment: "client",
+        depends: {
+          fabricloader: `>=${ZEN_SETTINGS_DROP_LOADER_VERSION}`,
+          minecraft: `=${target.minecraftVersion}`,
+          java: ">=25"
+        }
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+
+  const sourceJar = path.join(stagingDir, `${target.key}-zen-client-compat.jar`);
+  runJarCreate(targetDir, sourceJar);
+  return {
+    ...target,
+    sourceJar,
+    sourceJarName: path.basename(sourceJar)
+  };
+}
+
 function readJsonIfPresent(filePath) {
   try {
     if (!fs.existsSync(filePath)) return {};
@@ -85,7 +133,7 @@ function inferLoaderBundleSpecs() {
 
       const jarPath = path.join(loaderDir, jarEntry.name);
       const meta = readJsonIfPresent(path.join(loaderDir, `${path.basename(jarEntry.name, ".jar")}.json`));
-      const version = String(meta.minecraftVersion || jarEntry.name.match(/1\.\d+(?:\.\d+)?/)?.[0] || "").trim();
+      const version = String(meta.minecraftVersion || jarEntry.name.match(/\d+\.\d+(?:\.\d+)?/)?.[0] || "").trim();
       const targetName = String(meta.targetName || `zen-client-${loader}.jar`).trim();
       const outName = version ? `zen-client-${loader}-${version}.jar` : targetName;
 
@@ -107,11 +155,20 @@ function inferLoaderBundleSpecs() {
 fs.mkdirSync(bundledDir, { recursive: true });
 const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), "zen-client-mod-bundles-"));
 const minecraftVersion = readGradleProperty("minecraft_version") || ZEN_SETTINGS_CURRENT_MINECRAFT_VERSION;
+const compatTargets = [
+  {
+    key: "release-26.2",
+    minecraftVersion: ZEN_SETTINGS_DROP_MINECRAFT_VERSION,
+    minecraftVersionRange: `=${ZEN_SETTINGS_DROP_MINECRAFT_VERSION}`,
+    requiredMods: [],
+    notes: "Compatibility bundle for Minecraft 26.2, which currently ships without published named mappings."
+  }
+];
 const buildTargets = [
   {
     key: "current",
     minecraftVersion,
-    minecraftVersionRange: `>=${ZEN_SETTINGS_CURRENT_MINECRAFT_VERSION}`,
+    minecraftVersionRange: `>=${ZEN_SETTINGS_CURRENT_MINECRAFT_VERSION} <${ZEN_SETTINGS_DROP_MINECRAFT_VERSION}`,
     properties: {}
   },
   {
@@ -138,6 +195,7 @@ const builtTargets = buildTargets.map((target) => {
     sourceJarName
   };
 });
+const builtCompatTargets = compatTargets.map(buildFabricCompatBundle);
 
 runBuild({}, neoModDir);
 const neoSourceJar = pickJar(neoLibsDir);
@@ -169,7 +227,28 @@ const bundles = builtTargets.flatMap((target) => [
     notes: "Uses the Fabric-compatible Zen mod bundle on Quilt.",
     sourcePath: target.sourceJar
   }
-]);
+]).concat(builtCompatTargets.flatMap((target) => [
+  {
+    loader: "fabric",
+    minecraftVersion: target.minecraftVersion,
+    minecraftVersionRange: target.minecraftVersionRange,
+    file: `zen-client-fabric-${target.minecraftVersion}.jar`,
+    targetName: "zen-client-fabric.jar",
+    requiredMods: target.requiredMods || [],
+    notes: target.notes,
+    sourcePath: target.sourceJar
+  },
+  {
+    loader: "quilt",
+    minecraftVersion: target.minecraftVersion,
+    minecraftVersionRange: target.minecraftVersionRange,
+    file: `zen-client-quilt-${target.minecraftVersion}.jar`,
+    targetName: "zen-client-quilt.jar",
+    requiredMods: target.requiredMods || [],
+    notes: target.notes,
+    sourcePath: target.sourceJar
+  }
+]));
 
 bundles.push({
   loader: "neoforge",
@@ -220,7 +299,11 @@ fs.writeFileSync(
         key: target.key,
         minecraftVersion: target.minecraftVersion,
         file: target.sourceJarName
-      })).concat({
+      })).concat(builtCompatTargets.map((target) => ({
+        key: target.key,
+        minecraftVersion: target.minecraftVersion,
+        file: target.sourceJarName
+      }))).concat({
         key: neoTarget.key,
         minecraftVersion: neoTarget.minecraftVersion,
         file: neoTarget.sourceJarName

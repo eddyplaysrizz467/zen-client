@@ -728,9 +728,10 @@ async function searchServerPlugins() {
 function isSnapshotVersion(version) {
   const value = String(version || "").trim().toLowerCase();
   if (!value) return false;
+  if (/^\d+\.\d+(?:\.\d+)?$/.test(value)) return false;
   if (/^\d{2}w\d{2}[a-z]$/.test(value)) return true;
-  if (/^1\.\d+(?:\.\d+)?-(pre|rc)\d+$/.test(value)) return true;
-  return !/^1\.\d+(?:\.\d+)?$/.test(value);
+  if (/^\d+\.\d+(?:\.\d+)?-(snapshot|pre|rc)-?\d+$/.test(value)) return true;
+  return true;
 }
 
 function skinHeadUrl(account) {
