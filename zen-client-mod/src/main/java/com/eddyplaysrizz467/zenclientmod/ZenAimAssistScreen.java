@@ -1,14 +1,15 @@
 package com.eddyplaysrizz467.zenclientmod;
 
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
 public final class ZenAimAssistScreen extends Screen {
   private final Screen parent;
-  private ZenGreenButton rangeButton;
-  private ZenGreenButton smoothButton;
-  private ZenGreenButton breakButton;
+  private Button rangeButton;
+  private Button smoothButton;
+  private Button breakButton;
 
   public ZenAimAssistScreen(Screen parent) {
     super(Component.literal("Aim Assist Settings"));
@@ -21,52 +22,54 @@ public final class ZenAimAssistScreen extends Screen {
     int startY = 74;
 
     addRenderableWidget(
-      ZenGreenButton.create(Component.literal("- Range"), button -> {
+      Button.builder(Component.literal("- Range"), button -> {
         ZenClientMod.config().adjustAimAssistRange(-0.5D);
         refreshButtons();
-      }, centerX - 110, startY, 70, 20)
+      }).bounds(centerX - 110, startY, 70, 20).build()
     );
-    rangeButton = addRenderableWidget(ZenGreenButton.create(rangeText(), button -> {}, centerX - 34, startY, 68, 20));
+    rangeButton = addRenderableWidget(Button.builder(rangeText(), button -> {}).bounds(centerX - 34, startY, 68, 20).build());
     rangeButton.active = false;
     addRenderableWidget(
-      ZenGreenButton.create(Component.literal("+ Range"), button -> {
+      Button.builder(Component.literal("+ Range"), button -> {
         ZenClientMod.config().adjustAimAssistRange(0.5D);
         refreshButtons();
-      }, centerX + 40, startY, 70, 20)
+      }).bounds(centerX + 40, startY, 70, 20).build()
     );
 
     addRenderableWidget(
-      ZenGreenButton.create(Component.literal("- Smooth"), button -> {
+      Button.builder(Component.literal("- Smooth"), button -> {
         ZenClientMod.config().adjustAimAssistSmoothness(-0.02D);
         refreshButtons();
-      }, centerX - 110, startY + 30, 70, 20)
+      }).bounds(centerX - 110, startY + 30, 70, 20).build()
     );
-    smoothButton = addRenderableWidget(ZenGreenButton.create(smoothText(), button -> {}, centerX - 34, startY + 30, 68, 20));
+    smoothButton = addRenderableWidget(Button.builder(smoothText(), button -> {}).bounds(centerX - 34, startY + 30, 68, 20).build());
     smoothButton.active = false;
     addRenderableWidget(
-      ZenGreenButton.create(Component.literal("+ Smooth"), button -> {
+      Button.builder(Component.literal("+ Smooth"), button -> {
         ZenClientMod.config().adjustAimAssistSmoothness(0.02D);
         refreshButtons();
-      }, centerX + 40, startY + 30, 70, 20)
+      }).bounds(centerX + 40, startY + 30, 70, 20).build()
     );
 
     addRenderableWidget(
-      ZenGreenButton.create(Component.literal("- Break"), button -> {
+      Button.builder(Component.literal("- Break"), button -> {
         ZenClientMod.config().adjustAimAssistBreakSensitivity(-0.5D);
         refreshButtons();
-      }, centerX - 110, startY + 60, 70, 20)
+      }).bounds(centerX - 110, startY + 60, 70, 20).build()
     );
-    breakButton = addRenderableWidget(ZenGreenButton.create(breakText(), button -> {}, centerX - 34, startY + 60, 68, 20));
+    breakButton = addRenderableWidget(Button.builder(breakText(), button -> {}).bounds(centerX - 34, startY + 60, 68, 20).build());
     breakButton.active = false;
     addRenderableWidget(
-      ZenGreenButton.create(Component.literal("+ Break"), button -> {
+      Button.builder(Component.literal("+ Break"), button -> {
         ZenClientMod.config().adjustAimAssistBreakSensitivity(0.5D);
         refreshButtons();
-      }, centerX + 40, startY + 60, 70, 20)
+      }).bounds(centerX + 40, startY + 60, 70, 20).build()
     );
 
     addRenderableWidget(
-      ZenGreenButton.create(Component.literal("Back"), button -> this.minecraft.setScreen(parent), centerX - 68, this.height - 34, 136, 20)
+      Button.builder(Component.literal("Back"), button -> this.minecraft.setScreen(parent))
+        .bounds(centerX - 68, this.height - 34, 136, 20)
+        .build()
     );
   }
 
@@ -90,18 +93,18 @@ public final class ZenAimAssistScreen extends Screen {
 
   @Override
   public void render(GuiGraphics context, int mouseX, int mouseY, float delta) {
-    ZenTheme.renderGreenFireBackground(context, this.width, this.height, delta);
     int panelLeft = (this.width / 2) - 200;
     int panelRight = (this.width / 2) + 200;
     int panelTop = 18;
     int panelBottom = this.height - 48;
-    ZenTheme.renderPanel(context, panelLeft, panelTop, panelRight, panelBottom);
+    context.fill(panelLeft, panelTop, panelRight, panelBottom, 0xCC090909);
+    context.fill(panelLeft, panelTop, panelRight, panelTop + 34, 0xE1121212);
 
     super.render(context, mouseX, mouseY, delta);
 
-    ZenTheme.drawCenteredOutlinedString(context, this.font, this.title, this.width / 2, 28, ZenTheme.WHITE, 0xFF063711);
-    ZenTheme.drawCenteredOutlinedString(context, this.font, Component.literal("Range = lock distance, Smooth = how softly it tracks."), this.width / 2, 48, ZenTheme.TEXT_SOFT, 0xFF063711);
-    ZenTheme.drawCenteredOutlinedString(context, this.font, Component.literal("Break = mouse movement needed to pause tracking."), this.width / 2, 60, 0xFFC7FFC7, 0xFF063711);
+    context.drawCenteredString(this.font, this.title, this.width / 2, 28, 0xFFFFFFFF);
+    context.drawCenteredString(this.font, Component.literal("Range = lock distance, Smooth = how softly it tracks."), this.width / 2, 48, 0xFF9E9E9E);
+    context.drawCenteredString(this.font, Component.literal("Break = how hard you move the mouse to cancel tracking for 1 second."), this.width / 2, 60, 0xFF7FC9FF);
   }
 
   @Override

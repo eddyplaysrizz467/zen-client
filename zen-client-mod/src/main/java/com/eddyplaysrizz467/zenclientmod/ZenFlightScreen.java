@@ -1,13 +1,14 @@
 package com.eddyplaysrizz467.zenclientmod;
 
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
 public final class ZenFlightScreen extends Screen {
   private final Screen parent;
-  private ZenGreenButton modeButton;
-  private ZenGreenButton speedButton;
+  private Button modeButton;
+  private Button speedButton;
 
   public ZenFlightScreen(Screen parent) {
     super(Component.literal("Flight Settings"));
@@ -20,34 +21,36 @@ public final class ZenFlightScreen extends Screen {
     int startY = 78;
 
     modeButton = addRenderableWidget(
-      ZenGreenButton.create(buildModeText(), button -> {
+      Button.builder(buildModeText(), button -> {
         ZenClientMod.config().cycleFlightMode();
         refreshButtons();
-      }, centerX - 110, startY, 220, 20)
+      }).bounds(centerX - 110, startY, 220, 20).build()
     );
 
     addRenderableWidget(
-      ZenGreenButton.create(Component.literal("- Speed"), button -> {
+      Button.builder(Component.literal("- Speed"), button -> {
         ZenClientMod.config().adjustFlightSpeed(-0.2D);
         refreshButtons();
-      }, centerX - 110, startY + 30, 70, 20)
+      }).bounds(centerX - 110, startY + 30, 70, 20).build()
     );
 
     speedButton = addRenderableWidget(
-      ZenGreenButton.create(buildSpeedText(), button -> {
-      }, centerX - 34, startY + 30, 68, 20)
+      Button.builder(buildSpeedText(), button -> {
+      }).bounds(centerX - 34, startY + 30, 68, 20).build()
     );
     speedButton.active = false;
 
     addRenderableWidget(
-      ZenGreenButton.create(Component.literal("+ Speed"), button -> {
+      Button.builder(Component.literal("+ Speed"), button -> {
         ZenClientMod.config().adjustFlightSpeed(0.2D);
         refreshButtons();
-      }, centerX + 40, startY + 30, 70, 20)
+      }).bounds(centerX + 40, startY + 30, 70, 20).build()
     );
 
     addRenderableWidget(
-      ZenGreenButton.create(Component.literal("Back"), button -> this.minecraft.setScreen(parent), centerX - 68, this.height - 34, 136, 20)
+      Button.builder(Component.literal("Back"), button -> this.minecraft.setScreen(parent))
+        .bounds(centerX - 68, this.height - 34, 136, 20)
+        .build()
     );
   }
 
@@ -66,18 +69,18 @@ public final class ZenFlightScreen extends Screen {
 
   @Override
   public void render(GuiGraphics context, int mouseX, int mouseY, float delta) {
-    ZenTheme.renderGreenFireBackground(context, this.width, this.height, delta);
     int panelLeft = (this.width / 2) - 200;
     int panelRight = (this.width / 2) + 200;
     int panelTop = 18;
     int panelBottom = this.height - 48;
-    ZenTheme.renderPanel(context, panelLeft, panelTop, panelRight, panelBottom);
+    context.fill(panelLeft, panelTop, panelRight, panelBottom, 0xCC090909);
+    context.fill(panelLeft, panelTop, panelRight, panelTop + 34, 0xE1121212);
 
     super.render(context, mouseX, mouseY, delta);
 
-    ZenTheme.drawCenteredOutlinedString(context, this.font, this.title, this.width / 2, 28, ZenTheme.WHITE, 0xFF063711);
-    ZenTheme.drawCenteredOutlinedString(context, this.font, Component.literal("10 flight modes: Vanilla, Drift, Dash, Glide, Hover, Boost, Cruise, Jet, Brake, Swift."), this.width / 2, 48, ZenTheme.TEXT_SOFT, 0xFF063711);
-    ZenTheme.drawCenteredOutlinedString(context, this.font, Component.literal("Speed range: 0.4x to 3.0x"), this.width / 2, 60, 0xFFC7FFC7, 0xFF063711);
+    context.drawCenteredString(this.font, this.title, this.width / 2, 28, 0xFFFFFFFF);
+    context.drawCenteredString(this.font, Component.literal("10 flight modes: Vanilla, Drift, Dash, Glide, Hover, Boost, Cruise, Jet, Brake, Swift."), this.width / 2, 48, 0xFF9E9E9E);
+    context.drawCenteredString(this.font, Component.literal("Speed range: 0.4x to 3.0x"), this.width / 2, 58, 0xFF7FC9FF);
   }
 
   @Override

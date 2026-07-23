@@ -27,8 +27,8 @@ public final class ZenFriendsScreen extends Screen {
     private final String name;
     private final String address;
     private final int baseY;
-    private ZenGreenButton copyButton;
-    private ZenGreenButton removeButton;
+    private Button copyButton;
+    private Button removeButton;
 
     private Entry(String name, String address, int baseY) {
       this.name = name;
@@ -71,17 +71,19 @@ public final class ZenFriendsScreen extends Screen {
     boolean hasOutsideAddress = !outsideAddress.isBlank();
     boolean hasAnyAddress = hasLocalAddress || hasOutsideAddress;
 
-    addRenderableWidget(ZenGreenButton.create(
+    addRenderableWidget(Button.builder(
         Component.literal(hasLocalAddress ? "Copy Wi-Fi" : "No Wi-Fi"),
-        button -> ZenClientMod.copyToClipboard(this.minecraft, ZenClientMod.currentLocalInvite(this.minecraft)),
-        panelLeft + 18, TOP_PADDING, 94, 20)).active = hasLocalAddress;
+        button -> ZenClientMod.copyToClipboard(this.minecraft, ZenClientMod.currentLocalInvite(this.minecraft)))
+      .bounds(panelLeft + 18, TOP_PADDING, 94, 20)
+      .build()).active = hasLocalAddress;
 
-    addRenderableWidget(ZenGreenButton.create(
+    addRenderableWidget(Button.builder(
         Component.literal(hasOutsideAddress ? "Copy Outside" : "No Outside"),
-        button -> ZenClientMod.copyToClipboard(this.minecraft, ZenClientMod.currentPublicInvite()),
-        panelLeft + 116, TOP_PADDING, 104, 20)).active = hasOutsideAddress;
+        button -> ZenClientMod.copyToClipboard(this.minecraft, ZenClientMod.currentPublicInvite()))
+      .bounds(panelLeft + 116, TOP_PADDING, 104, 20)
+      .build()).active = hasOutsideAddress;
 
-    addRenderableWidget(ZenGreenButton.create(
+    addRenderableWidget(Button.builder(
         Component.literal("Save Host"),
         button -> {
           String currentLocal = ZenClientMod.currentLocalInvite(this.minecraft);
@@ -96,30 +98,41 @@ public final class ZenFriendsScreen extends Screen {
             rebuildEntries();
             rebuildFriendWidgets();
           }
-        },
-        panelLeft + 224, TOP_PADDING, 86, 20)).active = hasAnyAddress;
+        })
+      .bounds(panelLeft + 224, TOP_PADDING, 86, 20)
+      .build()).active = hasAnyAddress;
 
-    addRenderableWidget(ZenGreenButton.create(Component.literal("Back"), button -> this.minecraft.setScreen(parent), panelRight - 88, TOP_PADDING, 70, 20));
+    addRenderableWidget(Button.builder(Component.literal("Back"), button -> this.minecraft.setScreen(parent))
+      .bounds(panelRight - 88, TOP_PADDING, 70, 20)
+      .build());
 
     inviteBox = new EditBox(this.font, panelLeft + 18, TOP_PADDING + 28, PANEL_WIDTH - 116, 20, Component.literal("Zen invite"));
     inviteBox.setHint(Component.literal("Paste server address"));
     inviteBox.setValue(typedInvite);
     addRenderableWidget(inviteBox);
 
-    addRenderableWidget(ZenGreenButton.create(Component.literal("Join"), button -> ZenClientMod.joinZenInvite(this.minecraft, this, inviteBox.getValue()), panelRight - 88, TOP_PADDING + 28, 70, 20));
+    addRenderableWidget(Button.builder(Component.literal("Join"), button -> ZenClientMod.joinZenInvite(this.minecraft, this, inviteBox.getValue()))
+      .bounds(panelRight - 88, TOP_PADDING + 28, 70, 20)
+      .build());
 
     for (Entry entry : entries) {
       int y = entry.baseY - scrollOffset;
-      entry.copyButton = addRenderableWidget(ZenGreenButton.create(Component.literal("Copy"), button -> {
+      entry.copyButton = addRenderableWidget(Button.builder(Component.literal("Copy"), button -> {
           ZenClientMod.copyToClipboard(this.minecraft, entry.address);
           button.setMessage(Component.literal("Copied"));
-        }, panelRight - 196, y + 6, 52, 20));
-      addRenderableWidget(ZenGreenButton.create(Component.literal("Join"), button -> ZenClientMod.joinZenInvite(this.minecraft, this, entry.address), panelRight - 138, y + 6, 54, 20)).visible = y + ROW_HEIGHT >= visibleTop && y <= visibleBottom;
-      entry.removeButton = addRenderableWidget(ZenGreenButton.create(Component.literal("Remove"), button -> {
+        })
+        .bounds(panelRight - 196, y + 6, 52, 20)
+        .build());
+      addRenderableWidget(Button.builder(Component.literal("Join"), button -> ZenClientMod.joinZenInvite(this.minecraft, this, entry.address))
+        .bounds(panelRight - 138, y + 6, 54, 20)
+        .build()).visible = y + ROW_HEIGHT >= visibleTop && y <= visibleBottom;
+      entry.removeButton = addRenderableWidget(Button.builder(Component.literal("Remove"), button -> {
           ZenClientMod.config().removeFriendServer(entry.name);
           rebuildEntries();
           rebuildFriendWidgets();
-        }, panelRight - 78, y + 6, 60, 20));
+        })
+        .bounds(panelRight - 78, y + 6, 60, 20)
+        .build());
 
       boolean visible = y + ROW_HEIGHT >= visibleTop && y <= visibleBottom;
       entry.copyButton.visible = visible;
@@ -131,37 +144,38 @@ public final class ZenFriendsScreen extends Screen {
 
   @Override
   public void render(GuiGraphics context, int mouseX, int mouseY, float delta) {
-    ZenTheme.renderGreenFireBackground(context, this.width, this.height, delta);
     int panelLeft = (this.width - PANEL_WIDTH) / 2;
     int panelRight = panelLeft + PANEL_WIDTH;
     int panelTop = 22;
     int panelBottom = this.height - 24;
-    ZenTheme.renderPanel(context, panelLeft, panelTop, panelRight, panelBottom);
-    ZenTheme.drawCenteredOutlinedString(context, this.font, this.title, this.width / 2, panelTop + 12, ZenTheme.WHITE, 0xFF063711);
+    context.fill(panelLeft - 1, panelTop - 1, panelRight + 1, panelBottom + 1, 0xAA2B3A31);
+    context.fill(panelLeft, panelTop, panelRight, panelBottom, 0xE0080F0B);
+    context.fill(panelLeft, panelTop, panelRight, panelTop + 38, 0xF0122118);
+    context.drawCenteredString(this.font, this.title, this.width / 2, panelTop + 12, 0xFFFFFFFF);
 
     String localAddress = ZenClientMod.currentLocalInvite(this.minecraft);
     String outsideAddress = ZenClientMod.currentPublicInvite();
     if (localAddress.isBlank() && outsideAddress.isBlank()) {
-      ZenTheme.drawOutlinedString(context, this.font, Component.literal("Open a singleplayer world and press Host Zen LAN first."), panelLeft + 18, 54, ZenTheme.TEXT_MUTED, 0xFF063711);
+      context.drawString(this.font, Component.literal("Open a singleplayer world and press Host Zen LAN first."), panelLeft + 18, 54, 0xFFB7B7B7, false);
     } else {
       String localText = localAddress.isBlank() ? "Same Wi-Fi: not open yet" : "Same Wi-Fi: " + localAddress;
       String outsideText = outsideAddress.isBlank() ? "Outside Wi-Fi: still checking" : "Outside Wi-Fi: " + outsideAddress;
-      ZenTheme.drawOutlinedString(context, this.font, Component.literal(localText), panelLeft + 18, 50, 0xFFBFFFD2, 0xFF063711);
-      ZenTheme.drawOutlinedString(context, this.font, Component.literal(outsideText), panelLeft + 18, 62, outsideAddress.isBlank() ? ZenTheme.TEXT_MUTED : 0xFFBFFFD2, 0xFF063711);
+      context.drawString(this.font, Component.literal(localText), panelLeft + 18, 50, 0xFFBFFFD2, false);
+      context.drawString(this.font, Component.literal(outsideText), panelLeft + 18, 62, outsideAddress.isBlank() ? 0xFFB7B7B7 : 0xFFBFFFD2, false);
     }
-    ZenTheme.drawOutlinedString(context, this.font, Component.literal("Far-away worlds need the host to share a Playit address or port-forward the shown TCP port."), panelLeft + 18, 76, ZenTheme.TEXT_MUTED, 0xFF063711);
+    context.drawString(this.font, Component.literal("Far-away worlds need the host to share a Playit address or port-forward the shown TCP port."), panelLeft + 18, 76, 0xFFB7B7B7, false);
 
     if (entries.isEmpty()) {
-      ZenTheme.drawCenteredOutlinedString(context, this.font, Component.literal("Saved server addresses will show here."), this.width / 2, TOP_PADDING + 78, ZenTheme.TEXT_MUTED, 0xFF063711);
+      context.drawCenteredString(this.font, Component.literal("Saved server addresses will show here."), this.width / 2, TOP_PADDING + 78, 0xFF909790);
     } else {
       for (Entry entry : entries) {
         int y = entry.baseY - scrollOffset;
         int visibleTop = ENTRY_TOP - 4;
         int visibleBottom = this.height - BOTTOM_PADDING - 8;
         if (y + ROW_HEIGHT < visibleTop || y > visibleBottom) continue;
-        ZenTheme.renderOptionCard(context, panelLeft + 18, y, panelRight - 18, y + ROW_HEIGHT, true);
-        ZenTheme.drawOutlinedString(context, this.font, Component.literal(entry.name), panelLeft + 28, y + 6, ZenTheme.WHITE, 0xFF063711);
-        ZenTheme.drawOutlinedString(context, this.font, Component.literal(entry.address), panelLeft + 28, y + 18, 0xFFB5D9BF, 0xFF063711);
+        context.fill(panelLeft + 18, y, panelRight - 18, y + ROW_HEIGHT, 0x5523382C);
+        context.drawString(this.font, entry.name, panelLeft + 28, y + 6, 0xFFFFFFFF, false);
+        context.drawString(this.font, entry.address, panelLeft + 28, y + 18, 0xFFB5D9BF, false);
       }
     }
 
